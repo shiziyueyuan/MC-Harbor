@@ -69,12 +69,8 @@ try {
     $manifestPath = Join-Path $manifestDirectory 'runtime.json'
     [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
     $project = Join-Path $repo 'windows\MCHarbor.Windows.csproj'
-    # MSBuild cannot normalize a command-line global property; use an absolute
-    # extensions path so NuGet's generated WinUI imports are found from any cwd.
-    $intermediate = (Join-Path $repo "windows\obj\$rid").TrimEnd('\') + '\'
     $properties = @("-p:Platform=$platform", "-p:HMCL_FX_DIR=$fx", "-p:HarborRuntimeDirectory=$runtime",
-        "-p:HarborGameRuntimeDirectory=$gameRuntime", "-p:HarborRuntimeManifest=$manifestPath",
-        "-p:BaseIntermediateOutputPath=$intermediate", "-p:MSBuildProjectExtensionsPath=$intermediate")
+        "-p:HarborGameRuntimeDirectory=$gameRuntime", "-p:HarborRuntimeManifest=$manifestPath")
     & $sdk restore $project -r $rid --configfile windows/NuGet.Config --ignore-failed-sources -p:NuGetAudit=false @properties
     if ($LASTEXITCODE -ne 0) { throw '.NET dependency restore failed.' }
     if ($Mode -eq 'Build') {
