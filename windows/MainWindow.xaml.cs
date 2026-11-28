@@ -5,7 +5,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 using MCHarbor.Windows.Services;
 using Windows.Graphics;
 using Windows.Storage.Pickers;
@@ -18,10 +18,6 @@ public sealed partial class MainWindow : Window
     private readonly List<GameInstance> _instances = [];
     private readonly HashSet<string> _gameDirectoryWrites = new(StringComparer.OrdinalIgnoreCase);
     private GameInstance? _activeModsInstance;
-    private Process? _gameProcess;
-    private Task? _launchTask;
-    private string? _stopFile;
-    private string? _runningGameRunDirectory;
     private bool _allowClose;
     private bool _closePromptOpen;
     private bool _closing;
@@ -42,6 +38,7 @@ public sealed partial class MainWindow : Window
         RootShell.Tag = this;
         Title = "MC Harbor";
         InitializeWindowChrome();
+        Closed += (_, _) => { DisposeWorkspaceBackdrop(); DisposeWorkspaceClip(); };
         RuntimeGameDirectory.Text = AppPaths.GameRoot;
         DownloadTaskList.ItemsSource = _downloadJobs;
         ResetLanguageWorkspace();
@@ -195,7 +192,7 @@ public sealed partial class MainWindow : Window
             AccountCardsLayout.ColumnDefinitions[1].Width = stacked ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
             AccountCardsLayout.RowDefinitions[1].Height = stacked ? GridLength.Auto : new GridLength(0);
             AccountCardsLayout.ColumnSpacing = stacked ? 0 : 22;
-            AccountCardsLayout.RowSpacing = stacked ? 14 : 12;
+            AccountCardsLayout.RowSpacing = 12;
             Grid.SetRow(AccountDetailsCard, stacked ? 1 : 0);
             Grid.SetColumn(AccountDetailsCard, stacked ? 0 : 1);
             Grid.SetColumnSpan(AccountLoginActions, stacked ? 1 : 2);
@@ -249,8 +246,14 @@ public sealed partial class MainWindow : Window
         {
             var result = await Task.Run(() => InstanceScanner.Scan(AppPaths.GameRoot));
             _instances.Clear();
-            _instances.AddRange(result.Select(instance => AppPaths.GetPreference(RunDirectoryPreferenceKey(instance.Directory)) is { Length: > 0 } path
-                ? instance with { RunDirectory = path } : instance));
+            _instances.AddRange(result.Select(instance =>
+            {
+                var run = AppPaths.GetPreference(RunDirectoryPreferenceKey(instance.Directory));
+                var icon = AppPaths.GetPreference(InstanceIconKey(instance));
+                return instance with { RunDirectory = run.Length > 0 ? run : instance.RunDirectory,
+                    Nickname = AppPaths.GetPreference(InstanceNicknameKey(instance)), IconPath = File.Exists(icon) ? icon : instance.IconPath };
+            }));
+            RestoreRunningGames();
             ApplyGameFilter();
             RuntimeGameDirectory.Text = AppPaths.GameRoot;
             if (_activeModsInstance is { } current)
@@ -274,7 +277,7 @@ public sealed partial class MainWindow : Window
 
     private async void ChooseRoot_Click(object sender, RoutedEventArgs e)
     {
-        if (_launchTask is { IsCompleted: false } || _catalogTask is { IsCompleted: false }
+        if (HasRunningGames || _catalogTask is { IsCompleted: false }
             || _instanceDownloadTask is { IsCompleted: false } || _languageBusy)
         {
             ShowStatus("请等当前游戏或资源任务结束后再切换游戏目录。", InfoBarSeverity.Warning);
@@ -576,7 +579,7 @@ public sealed partial class MainWindow : Window
                         row["name"]?.GetValue<string>() ?? Path.GetFileName(path),
                         row["kind"]?.GetValue<string>() ?? "",
                         row["enabled"]?.GetValue<bool>() ?? false,
-                        row["languageFiles"]?.GetValue<int>() ?? 0));
+                        row["languageFiles"]?.GetValue<int>() ?? 0) { ModVersion = row["version"]?.GetValue<string>(), Authors = row["authors"]?.GetValue<string>(), IconPath = row["iconPath"]?.GetValue<string>() });
                 }
             }
             _instanceResources = resources.ToArray();
@@ -640,9 +643,9 @@ public sealed partial class MainWindow : Window
             ShowStatus("实例运行目录不存在。可在「更多」中重新选择目录。", InfoBarSeverity.Warning);
             return;
         }
-        if (_launchTask is { IsCompleted: false })
+        if (IsRunningInstance(instance))
         {
-            ShowStatus("当前已有游戏启动任务。", InfoBarSeverity.Warning);
+            ShowStatus("此实例正在启动或运行。", InfoBarSeverity.Warning);
             return;
         }
         if (_gameDirectoryWrites.Contains(GameDirectoryKey(instance.RunDirectory)))
@@ -658,6 +661,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        var options = ReadInstanceOptions(instance);
         var arguments = new Dictionary<string, object?>
         {
             ["id"] = instance.Id,
@@ -665,11 +669,14 @@ public sealed partial class MainWindow : Window
             ["loader"] = instance.Loader,
             ["version"] = instance.Version,
             ["username"] = AppPaths.OfflineUsername,
-            ["memory"] = (int)ReadSettingNumber("gameMemory", 3072, 1024, 6144),
+            ["memory"] = options.Memory > 0 ? Math.Clamp(options.Memory, 2048, 6144) : (GameMemory.SelectedIndex + 2) * 1024,
+            ["width"] = Math.Clamp(options.Width, 640, 7680), ["height"] = Math.Clamp(options.Height, 480, 4320),
+            ["fullscreen"] = options.Fullscreen, ["jvmArguments"] = options.JvmArguments ?? "",
             ["completeDependencies"] = CompleteDependencies.IsOn,
             ["serverAddress"] = serverAddress ?? ""
         };
         var gameJava = AppPaths.GetPreference(JavaPreferenceKey(instance));
+        if (gameJava.Length == 0) gameJava = AppPaths.GetPreference("gameJava");
         arguments["javaExplicit"] = gameJava.Length > 0;
         arguments["gameJava"] = gameJava;
 
@@ -690,20 +697,25 @@ public sealed partial class MainWindow : Window
             }
             var controlDirectory = Path.Combine(AppPaths.DataDirectory, "launch-control");
             Directory.CreateDirectory(controlDirectory);
-            _stopFile = Path.Combine(controlDirectory, $"{Guid.NewGuid():D}.stop");
-            arguments["stopFile"] = _stopFile;
-            _gameProcess = null;
-            _runningGameRunDirectory = instance.RunDirectory;
+            var stopFile = Path.Combine(controlDirectory, $"{Guid.NewGuid():D}.stop");
+            arguments["stopFile"] = stopFile;
+            var session = new ActiveGameSession(instance, stopFile);
+            _gameSessions.Add(GameDirectoryKey(instance.RunDirectory), session);
             ApplyTheme();
             UpdateWallpaperPlayback();
-            StopGameButton.IsEnabled = false;
             ShowStatus($"正在启动 {instance.Id}…", InfoBarSeverity.Informational);
             var historyId = Guid.NewGuid();
             arguments["historySessionID"] = historyId.ToString();
             var peers = _nextPlayPeers;
             _nextPlayPeers = [];
-            _launchTask = RunLaunchAsync(java, arguments, instance, historyId, peers);
-            await _launchTask;
+            try { PendingGameHistoryStore.Save(AppPaths.DataDirectory, historyId, instance, peers, stopFile); }
+            catch (Exception error)
+            {
+                CompleteGameSession(session);
+                ShowStatus("无法保存游戏会话，请检查数据目录是否可写：" + error.Message, InfoBarSeverity.Error);
+                return;
+            }
+            await RunLaunchAsync(java, arguments, session, historyId, peers);
         }
         catch (System.ComponentModel.Win32Exception)
         {
@@ -716,46 +728,43 @@ public sealed partial class MainWindow : Window
     }
 
     private async Task RunLaunchAsync(string java, IReadOnlyDictionary<string, object?> arguments,
-        GameInstance instance, Guid historyId, string[] peers)
+        ActiveGameSession session, Guid historyId, string[] peers)
     {
         try
         {
             await PauseLanguageForGameAsync();
-            var result = await new BridgeClient(java).InvokeAsync("launch", arguments, HandleBridgeEvent);
+            var result = await new BridgeClient(java).InvokeAsync("launch", arguments, message => HandleBridgeEvent(message, session));
             var exitCode = result["exitCode"]?.GetValue<int>() ?? 0;
             try
             {
-                PlayHistoryStore.Complete(instance, historyId, peers);
+                PlayHistoryStore.Complete(session.Instance, historyId, peers);
+                PendingGameHistoryStore.Remove(AppPaths.DataDirectory, historyId);
                 if (_friendsClient is { } client && _friends?.Me.Sharing == true)
                     _ = FriendsOperationAsync(() => UploadLocalPlayHistoryAsync(client));
             }
             catch (Exception error) { StartupDiagnostics.Write("保存游玩记录失败", error); }
-            ShowStatus(exitCode == 0 ? "Minecraft 已退出。" : $"Minecraft 异常退出，退出码 {exitCode}。可在数据目录的 logs 中查看日志。",
+            if (!_closing) ShowStatus(exitCode == 0 ? "Minecraft 已退出。" : $"Minecraft 异常退出，退出码 {exitCode}。可在数据目录的 logs 中查看日志。",
                 exitCode == 0 ? InfoBarSeverity.Informational : InfoBarSeverity.Warning);
         }
         catch (Exception error)
         {
-            ShowStatus(error.Message, InfoBarSeverity.Error);
+            if (!_closing) ShowStatus(error.Message, InfoBarSeverity.Error);
         }
         finally
         {
-            _gameProcess?.Dispose();
-            _gameProcess = null;
-            _runningGameRunDirectory = null;
-            ApplyTheme();
-            UpdateWallpaperPlayback();
-            StopGameButton.IsEnabled = false;
-            if (_stopFile is not null)
+            try
             {
-                try { File.Delete(_stopFile); }
-                catch (IOException) { }
+                var receipt = Path.Combine(AppPaths.DataDirectory, "social", "receipts", historyId.ToString("D").ToUpperInvariant() + ".json");
+                if (!File.Exists(receipt)) PendingGameHistoryStore.Remove(AppPaths.DataDirectory, historyId);
             }
-            _stopFile = null;
-            ResumeLanguageAfterGame();
+            catch (IOException error) { StartupDiagnostics.Write("清理会话元数据失败", error); }
+            CompleteGameSession(session);
         }
     }
 
-    private void HandleBridgeEvent(System.Text.Json.Nodes.JsonObject message)
+    private void HandleBridgeEvent(JsonObject message) => HandleBridgeEvent(message, null);
+
+    private void HandleBridgeEvent(JsonObject message, ActiveGameSession? session)
     {
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -763,21 +772,15 @@ public sealed partial class MainWindow : Window
             if (kind == "progress")
             {
                 var detail = message["message"]?.GetValue<string>();
-                if (!string.IsNullOrWhiteSpace(detail)) ShowStatus(detail, InfoBarSeverity.Informational);
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    RecordBackendMessage(detail);
+                    ShowStatus(detail, InfoBarSeverity.Informational);
+                }
             }
-            else if (kind == "launched" && message["pid"] is { } pidValue)
+            else if (kind == "launched" && session is not null)
             {
-                try
-                {
-                    _gameProcess = Process.GetProcessById(checked((int)pidValue.GetValue<long>()));
-                    StopGameButton.IsEnabled = true;
-                    UpdateFeaturedLaunch();
-                    ShowStatus("Minecraft 正在运行。", InfoBarSeverity.Success);
-                }
-                catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
-                {
-                    ShowStatus("游戏已启动，但暂时无法取得其进程窗口。", InfoBarSeverity.Warning);
-                }
+                AttachLaunchedProcess(session, message);
             }
             else if (kind == "accountUpdated" && message["data"] is JsonObject accountData)
             {
@@ -962,52 +965,47 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void StopGame_Click(object sender, RoutedEventArgs e) => await RequestStopAsync();
+    private async void StopGame_Click(object sender, RoutedEventArgs e) =>
+        await RequestStopAsync(MenuInstance(sender) ?? _activeModsInstance ?? InstanceList.SelectedItem as GameInstance);
 
-    private async Task<bool> RequestStopAsync()
+    private async Task<bool> RequestStopAsync(GameInstance? instance = null)
     {
-        var game = _gameProcess;
-        if (game is null || game.HasExited)
+        ActiveGameSession? session = null;
+        if (instance is not null) _gameSessions.TryGetValue(GameDirectoryKey(instance.RunDirectory), out session);
+        if (instance is null) session = _gameSessions.Values.FirstOrDefault(item => item.Process is not null);
+        if (session?.Receipt is not { } receipt || GameSessionStore.OpenVerifiedProcess(receipt) is not { } game)
         {
             ShowStatus("Minecraft 尚未进入可关闭状态。", InfoBarSeverity.Warning);
             return false;
         }
-
-        try
+        using (game)
         {
-            game.Refresh();
-            if (!game.CloseMainWindow())
+            try
             {
-                ShowStatus("尚未找到游戏窗口。请回到游戏保存并正常退出。", InfoBarSeverity.Warning);
-                return false;
-            }
-
-            var wait = game.WaitForExitAsync();
-            if (await Task.WhenAny(wait, Task.Delay(TimeSpan.FromSeconds(30))) == wait)
-            {
-                ShowStatus("Minecraft 已正常退出。", InfoBarSeverity.Success);
+                game.Refresh();
+                if (game.CloseMainWindow())
+                {
+                    var wait = game.WaitForExitAsync();
+                    if (await Task.WhenAny(wait, Task.Delay(TimeSpan.FromSeconds(30))) == wait) return true;
+                }
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = RootShell.XamlRoot, Title = "游戏仍在运行",
+                    Content = "请先确认游戏已保存。强制退出可能丢失尚未保存的进度。",
+                    PrimaryButtonText = "强制退出", CloseButtonText = "继续等待", DefaultButton = ContentDialogButton.Close
+                };
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary) return false;
+                using var verified = GameSessionStore.OpenVerifiedProcess(receipt);
+                if (verified is null) return true;
+                await File.WriteAllTextAsync(session.StopFile, "stop");
+                ShowStatus("已发送退出请求。", InfoBarSeverity.Warning);
                 return true;
             }
-
-            var dialog = new ContentDialog
+            catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
             {
-                XamlRoot = RootShell.XamlRoot,
-                Title = "游戏仍在运行",
-                Content = "请先确认游戏已保存。强制退出可能丢失尚未保存的进度。",
-                PrimaryButtonText = "强制退出",
-                CloseButtonText = "继续等待",
-                DefaultButton = ContentDialogButton.Close
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return false;
-
-            if (_stopFile is not null) await File.WriteAllTextAsync(_stopFile, "force");
-            ShowStatus("已发送强制退出请求。", InfoBarSeverity.Warning);
-            return true;
-        }
-        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
-        {
-            ShowStatus(error.Message, InfoBarSeverity.Error);
-            return false;
+                ShowStatus(error.Message, InfoBarSeverity.Error);
+                return false;
+            }
         }
     }
 
@@ -1024,7 +1022,7 @@ public sealed partial class MainWindow : Window
             else PlayInterfaceSound("navigate");
         }
         _lastNavigationTag = tag;
-        var isGames = tag == "games";
+        var isGames = tag == "games" || IsInstancePage(tag);
         var showWorkspace = IsInstancePage(tag) && _activeModsInstance is not null;
         var showResources = showWorkspace && tag == "collections";
         var showLanguage = tag == "localization";
@@ -1034,9 +1032,11 @@ public sealed partial class MainWindow : Window
         var showModFolders = tag == "modfolders";
         var showAccounts = tag == "accounts";
 
+        ApplyMacPageLayout(tag);
         PageEyebrow.Text = IsInstancePage(tag) ? "游戏" : SidebarPages.First(page => page.Page == tag).Label;
         PageTitle.FontSize = showFriends ? 32 : 34;
-        PageTitle.Text = tag switch
+        PageTitle.LineHeight = showFriends ? 39 : 41;
+        PageTitle.Text = (IsInstancePage(tag) ? "games" : tag) switch
         {
             "games" => "游戏库",
             "friends" => "好友与最近游戏",
@@ -1050,6 +1050,7 @@ public sealed partial class MainWindow : Window
         GameActions.Visibility = InstanceList.Visibility = VisibleWhen(isGames);
         InstanceResourcesCard.Visibility = ResourcesList.Visibility = VisibleWhen(showResources);
         InstanceSettingsCard.Visibility = VisibleWhen(showWorkspace && tag == "instance-settings");
+        InstanceMediaPage.Visibility = VisibleWhen(showResources && _resourceCategory is ("screenshots" or "logs"));
         LocalizationCard.Visibility = LocalizationWorkspace.Visibility = VisibleWhen(showLanguage);
         MultiplayerPage.Visibility = VisibleWhen(showMultiplayer);
         FriendsPage.Visibility = FriendsRefreshButton.Visibility = VisibleWhen(showFriends);
@@ -1078,7 +1079,12 @@ public sealed partial class MainWindow : Window
             RefreshModFolders();
         }
         UpdateFriendsPage(showFriends);
-        if (showResources) _ = LoadResourcesAsync();
+        if (showWorkspace && tag == "instance-settings") _ = MeasureInstanceSpaceAsync();
+        if (showResources)
+        {
+            if (_resourceCategory is "screenshots" or "logs") UpdateResourceRows();
+            else _ = LoadResourcesAsync();
+        }
     }
 
     private static bool IsSafeInstanceName(string value) => IsSafeFileName(value, 100);
@@ -1109,24 +1115,14 @@ public sealed partial class MainWindow : Window
                 ShowStatus("正在处理实例文件。请等待写入完成后再关闭。", InfoBarSeverity.Warning);
                 return;
             }
-            if (_launchTask is { IsCompleted: false } launch)
+            if (_gameSessions.Values.Any(item => item.Process is null))
             {
-                var dialog = new ContentDialog
-                {
-                    XamlRoot = RootShell.XamlRoot,
-                    Title = "Minecraft 正在启动或运行",
-                    Content = "关闭启动器前会请求 Minecraft 保存并退出。",
-                    PrimaryButtonText = "关闭游戏并退出",
-                    CloseButtonText = "返回启动器",
-                    DefaultButton = ContentDialogButton.Close
-                };
-                if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-                _closing = true;
-                if (!launch.IsCompleted && !await RequestStopAsync()) return;
-                await launch;
+                ShowStatus("游戏正在启动。启动完成后可以退出启动器，游戏会继续运行。", InfoBarSeverity.Informational);
+                return;
             }
             _closing = true;
             _resumeAfterGame = false;
+            _instanceSpaceCancellation?.Cancel();
             _languageTranslation?.Cancel();
             _roomCancellation?.Cancel();
             _sakuraCancellation?.Cancel();
@@ -1145,7 +1141,7 @@ public sealed partial class MainWindow : Window
             if (!_allowClose)
             {
                 _closing = false;
-                if (_launchTask is null or { IsCompleted: true }) ResumeLanguageAfterGame();
+                if (!HasRunningGames) ResumeLanguageAfterGame();
             }
         }
     }

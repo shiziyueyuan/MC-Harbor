@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../shared/MCHarbor.Core/MCHarbor.Core.csproj" />
     <Compile Include="../../windows/Services/WindowsPlatform.cs" Link="WindowsPlatform.cs" />
     <Compile Include="../../windows/Services/BridgeClient.cs" Link="BridgeClient.cs" />
     <Compile Include="../../windows/Services/JavaRuntimeLocator.cs" Link="JavaRuntimeLocator.cs" />

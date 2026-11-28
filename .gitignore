@@ -46,3 +46,14 @@ node_modules/
 /tests/windows-local-transport/obj/
 /tests/windows-platform-checks/bin/
 /tests/windows-platform-checks/obj/
+/shared/**/bin/
+/shared/**/obj/
+/linux/**/bin/
+/linux/**/obj/
+/tests/core-checks/bin/
+/tests/core-checks/obj/
+/tests/linux-ui-checks/bin/
+/tests/linux-ui-checks/obj/
+
+/tests/windows-game-sessions/bin/
+/tests/windows-game-sessions/obj/

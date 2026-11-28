@@ -9,6 +9,9 @@ public sealed record InstanceResource(
     bool Enabled,
     int LanguageFiles)
 {
+    public string? ModVersion { get; init; }
+    public string? Authors { get; init; }
+    public string? IconPath { get; init; }
     public string Category => Kind switch
     {
         "mods" => "模组",

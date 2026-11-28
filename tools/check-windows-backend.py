@@ -59,11 +59,22 @@ with tempfile.TemporaryDirectory(prefix="harbor-arm-check-") as temporary:
     packs.mkdir()
     with zipfile.ZipFile(packs / "fixture.zip", "w") as archive:
         archive.writestr("pack.mcmeta", json.dumps({"pack": {"pack_format": 15, "description": "Disposable fixture"}}))
+        archive.writestr("assets/fixture/lang/en_us.json", json.dumps({"fixture.test": "Fixture translation"}))
     resources = invoke(java, base / "resources", {"command": "resources", "root": str(instance),
                        "runDirectory": str(run), "id": "fixture", "resolve": False}, modules)
     if "resources" not in resources or len(resources["resources"]) != 1:
         raise RuntimeError("Resource scan did not return its expected schema.")
+    language_args = {"root": str(instance), "runDirectory": str(run), "id": "fixture",
+                     "name": "fixture", "version": "1.20.1", "loader": "vanilla"}
+    invoke(java, base / "language", {"command": "langOpen", **language_args}, modules)
+    scanned = invoke(java, base / "language", {"command": "langScan", **language_args}, modules)
+    if not scanned.get("project") or not scanned.get("sources"):
+        raise RuntimeError("Localization scan did not detect the disposable resource-pack fixture.")
+    offline = invoke(java, base / "account", {"command": "offlineAccount", "username": "FixtureUser"}, modules)
+    if offline.get("metadata", {}).get("kind") != "offline":
+        raise RuntimeError("Offline account fixture did not return its expected schema.")
     print(json.dumps({"nativeJava": native["javaArchitecture"], "javaFxModules": modules,
                       "gameJava": game["javaArchitecture"], "gamePlatform": game["gamePlatform"],
                       "systemPlatform": game["systemPlatform"], "javaInspection": "passed",
-                      "resourceScan": "passed", "realPlayerData": False}))
+                      "resourceScan": "passed", "localizationOpenAndScan": "passed",
+                      "offlineAccount": "passed", "realPlayerData": False}))

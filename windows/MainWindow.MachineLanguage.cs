@@ -10,7 +10,7 @@ public sealed partial class MainWindow
     private async void MachineLanguage_Click(object sender, RoutedEventArgs e)
     {
         if (_languageBusy || _languageTranslationTask is { IsCompleted: false }) return;
-        if (_launchTask is { IsCompleted: false })
+        if (HasRunningGames)
         {
             ShowStatus("游戏正在运行。退出后即可开始本机补译。", InfoBarSeverity.Warning);
             return;
@@ -32,51 +32,19 @@ public sealed partial class MainWindow
                 };
                 if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
             }
-            if (_launchTask is { IsCompleted: false } || _languageBusy) return;
+            if (HasRunningGames || _languageBusy) return;
             _pausedTranslationScope = arguments["selected"] as string[];
-            _useIndexTranslation = false;
             _onlineTranslation = null;
             await StartMachineLanguageAsync();
         }
         catch (Exception error) { ShowStatus("本机补译失败：" + error.Message, InfoBarSeverity.Error); }
     }
 
-    private bool _useIndexTranslation;
-
-    private async void IndexLanguage_Click(object sender, RoutedEventArgs e)
-    {
-        if (_languageBusy || _languageTranslationTask is { IsCompleted: false }) return;
-        if (_launchTask is { IsCompleted: false })
-        {
-            ShowStatus("游戏正在运行。退出后即可开始本机补译。", InfoBarSeverity.Warning);
-            return;
-        }
-        try
-        {
-            var arguments = SelectedLanguageArguments();
-            var dialog = new ContentDialog
-            {
-                XamlRoot = RootShell.XamlRoot,
-                Title = "使用进阶本机翻译",
-                Content = "此功能使用 Index-Translate 2B Q4_K_M。首次需要通过 WinGet 安装 llama.cpp，并下载约 1.31 GB 的模型；建议预留至少 1.5 GB 磁盘空间。模型只在本机运行，使用较低进程优先级和两个 CPU 线程。翻译仅在 Minecraft 退出时执行，开始游戏会暂停并在退出后续跑。",
-                PrimaryButtonText = "准备并开始",
-                CloseButtonText = "取消",
-                DefaultButton = ContentDialogButton.Primary
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary || _launchTask is { IsCompleted: false } || _languageBusy) return;
-            _pausedTranslationScope = arguments["selected"] as string[];
-            _useIndexTranslation = true;
-            _onlineTranslation = null;
-            await StartMachineLanguageAsync();
-        }
-        catch (Exception error) { ShowStatus("进阶本机补译失败：" + error.Message, InfoBarSeverity.Error); }
-    }
-
     private OnlineTranslationClient? _onlineTranslation;
 
     private async void OnlineLanguage_Click(object sender, RoutedEventArgs e)
     {
-        if (_languageBusy || _languageTranslationTask is { IsCompleted: false } || _launchTask is { IsCompleted: false })
+        if (_languageBusy || _languageTranslationTask is { IsCompleted: false } || HasRunningGames)
         {
             ShowStatus("请等待当前游戏或补译任务结束。", InfoBarSeverity.Warning);
             return;
@@ -87,7 +55,7 @@ public sealed partial class MainWindow
             var engine = new ComboBox
             {
                 Header = "翻译服务", ItemsSource = new[] { "B 站 Index-Translate", "阿里云 Qwen-MT", "MyMemory", "Google 公共接口" },
-                SelectedIndex = 0, MinWidth = 280
+                SelectedIndex = Math.Max(0, TranslationProvider.SelectedIndex), MinWidth = 280
             };
             var key = new PasswordBox { Header = "阿里云 API 密钥", MaxLength = 512, Visibility = Visibility.Collapsed };
             var notice = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 360 };
@@ -95,12 +63,13 @@ public sealed partial class MainWindow
             {
                 var selected = (OnlineTranslator)Math.Max(0, engine.SelectedIndex);
                 key.Visibility = selected == OnlineTranslator.Qwen ? Visibility.Visible : Visibility.Collapsed;
-                notice.Text = $"未译文字会发送给 {OnlineTranslationClient.OriginName(selected)}。每次最多处理 64 条。";
+                var host = selected == OnlineTranslator.Qwen ? OnlineTranslationClient.QwenAddress(AppPaths.GetPreference("translationQwenEndpoint")).Host : OnlineTranslationClient.OriginName(selected);
+                notice.Text = $"未译文字会发送给 {host}。每次最多处理 64 条。";
             }
             engine.SelectionChanged += (_, _) => SelectEngine();
             SelectEngine();
             var dialog = FriendDialog("在线补译", new StackPanel { Spacing = 8, Children = { engine, key, notice } }, "同意发送并补译");
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary || _languageBusy || _launchTask is { IsCompleted: false }) return;
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary || _languageBusy || HasRunningGames) return;
             var provider = (OnlineTranslator)engine.SelectedIndex;
             string? token = null;
             if (provider == OnlineTranslator.Qwen)
@@ -113,8 +82,7 @@ public sealed partial class MainWindow
                 if (input.Length > 0) AppSecrets.Save("online-translation-qwen", input);
             }
             _pausedTranslationScope = arguments["selected"] as string[];
-            _useIndexTranslation = false;
-            _onlineTranslation = new OnlineTranslationClient(provider, token);
+            _onlineTranslation = new OnlineTranslationClient(provider, token, AppPaths.GetPreference("translationQwenEndpoint"));
             await StartMachineLanguageAsync();
         }
         catch (Exception error) { ShowStatus("在线补译失败：" + error.Message, InfoBarSeverity.Error); }
@@ -167,7 +135,7 @@ public sealed partial class MainWindow
         var saved = 0;
         var attempted = 0;
         var project = (string)request["project"]!;
-        request["limit"] = online is not null ? 4 : _useIndexTranslation ? 2 : 16;
+        request["limit"] = online is not null ? 4 : 16;
         var pending = await bridge.InvokeAsync("langPending", request, cancellationToken: cancellation);
         if (pending["entries"] is not JsonArray { Count: > 0 })
         {
@@ -175,11 +143,9 @@ public sealed partial class MainWindow
             return;
         }
 
-        var name = online is not null ? "在线" : _useIndexTranslation ? "Index-Translate 2B 本机" : "本机";
+        var name = online is not null ? "在线" : "本机";
         ShowStatus($"正在启动{name}补译…", InfoBarSeverity.Informational);
-        await using (IMachineTranslationWorker? worker = online is not null ? null : _useIndexTranslation
-            ? await IndexTranslationWorker.StartAsync(message => ShowStatus(message, InfoBarSeverity.Informational), cancellation)
-            : await LocalTranslationWorker.StartAsync(message => ShowStatus(message, InfoBarSeverity.Informational), cancellation))
+        await using (IMachineTranslationWorker? worker = online is not null ? null : await LocalTranslationWorker.StartAsync(message => ShowStatus(message, InfoBarSeverity.Informational), cancellation))
         {
             while (pending["entries"] is JsonArray { Count: > 0 } rows)
             {
@@ -253,7 +219,7 @@ public sealed partial class MainWindow
         _resumeAfterGame = false;
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (_languageBusy || _launchTask is { IsCompleted: false }) return;
+            if (_languageBusy || HasRunningGames) return;
             _ = StartMachineLanguageAsync();
         });
     }

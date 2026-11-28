@@ -7,6 +7,7 @@ internal sealed class HarborWindowFrame : IDisposable
     private const uint NonClientCalculateSize = 0x0083;
     private const uint NonClientHitTest = 0x0084;
     private const uint NonClientDestroy = 0x0082;
+    private const uint GetMinMaxInfo = 0x0024;
     private const uint FrameChangedWithoutMoveOrResize = 0x237;
     private const int Client = 1;
     private const int Caption = 2;
@@ -35,6 +36,24 @@ internal sealed class HarborWindowFrame : IDisposable
 
     private nint HandleMessage(nint window, uint message, nuint wparam, nint lparam, nuint id, nuint reference)
     {
+        if (message == GetMinMaxInfo && lparam != 0)
+        {
+            var result = DefSubclassProc(window, message, wparam, lparam);
+            var limits = Marshal.PtrToStructure<MinMaxInfo>(lparam);
+            var scale = Math.Max(96, GetDpiForWindow(window)) / 96d;
+            var width = (int)Math.Round(MacLayout.MinimumWindowWidth * scale);
+            var height = (int)Math.Round(MacLayout.MinimumWindowHeight * scale);
+            var monitor = MonitorFromWindow(window, 2);
+            var screen = new MonitorInfo { Size = (uint)Marshal.SizeOf<MonitorInfo>() };
+            if (monitor != 0 && GetMonitorInfo(monitor, ref screen))
+            {
+                width = Math.Min(width, screen.WorkArea.Right - screen.WorkArea.Left);
+                height = Math.Min(height, screen.WorkArea.Bottom - screen.WorkArea.Top);
+            }
+            limits.MinimumTrack = new WindowPoint { X = width, Y = height };
+            Marshal.StructureToPtr(limits, lparam, false);
+            return result;
+        }
         if (message == NonClientDestroy)
         {
             Dispose();
@@ -87,6 +106,11 @@ internal sealed class HarborWindowFrame : IDisposable
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WindowRect { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowPoint { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MinMaxInfo { public WindowPoint Reserved, MaximumSize, MaximumPosition, MinimumTrack, MaximumTrack; }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MonitorInfo { public uint Size; public WindowRect Monitor, WorkArea; public uint Flags; }

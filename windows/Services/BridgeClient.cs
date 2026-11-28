@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 
 namespace MCHarbor.Windows.Services;
 
-internal sealed class BridgeClient
+internal sealed class BridgeClient : MCHarbor.Core.Services.IBridgeClient
 {
     private readonly string _javaExecutable;
 
@@ -71,7 +71,7 @@ internal sealed class BridgeClient
             ["command"] = command,
             ["root"] = AppPaths.GameRoot,
             ["source"] = AppPaths.GetPreference("downloadSource", "auto"),
-            ["threads"] = 8
+            ["threads"] = int.TryParse(AppPaths.GetPreference("downloadThreads", "8"), out var threads) ? Math.Clamp(threads, 4, 24) : 8
         };
         if (arguments is not null)
         {
@@ -81,6 +81,7 @@ internal sealed class BridgeClient
 
         JsonObject? result = null;
         string? backendError = null;
+        var javaInitializationFailed = false;
         try
         {
             await process.StandardInput.WriteLineAsync(request.ToJsonString());
@@ -89,6 +90,10 @@ internal sealed class BridgeClient
             while (await process.StandardOutput.ReadLineAsync(cancellationToken) is { } line)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
+                if (line.Contains("Error occurred during initialization of VM", StringComparison.Ordinal)
+                    || line.Contains("Could not create the Java Virtual Machine", StringComparison.Ordinal)
+                    || line.Contains("java.lang.InternalError", StringComparison.Ordinal))
+                    javaInitializationFailed = true;
                 JsonObject message;
                 try
                 {
@@ -125,7 +130,10 @@ internal sealed class BridgeClient
         }
 
         if (backendError is not null) throw new BridgeException(backendError);
-        if (process.ExitCode != 0) throw new BridgeException($"Java 后端退出，代码 {process.ExitCode}。");
+        if (process.ExitCode != 0)
+            throw new BridgeException(javaInitializationFailed
+                ? $"Java 运行时初始化失败（退出代码 {process.ExitCode}）。请重新安装或解压完整程序，确保运行时文件来自同一个版本。"
+                : $"Java 后端退出，代码 {process.ExitCode}。请检查运行环境及随程序提供的后端文件。");
         return result ?? throw new BridgeException("Java 后端未返回结果。");
     }
 

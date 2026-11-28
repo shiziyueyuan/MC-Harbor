@@ -1,5 +1,7 @@
 # Windows 移植开发入口
 
+> 当前工作区正在按 macOS 1.7.2 对齐；新功能、页面位置与验证边界见 [WINDOWS_LAYOUT.md](WINDOWS_LAYOUT.md)。本次已移除 Windows 专有的 2B 补译与账号迁移包入口，保留轻量离线补译及 Windows 凭据保护。下文部分构建与验收记录属于此前版本，应以本条和实际构建结果为准。
+
 正式负责人：**时咨月.**（[shiziyueyuan](https://github.com/shiziyueyuan)）。项目作者：**ADsurfboard**。
 
 本分支以原项目 windows 分支的 macOS 源码为基线，新增 WinUI 3 / .NET 10 Windows x64 与 ARM64 客户端，并沿用仓库固定的 HMCL Java 后端。x64 面向 Windows 10 22H2 和 Windows 11；ARM64 面向 Windows 11 24H2 或更新版本，架构划分、兼容进程和验证边界见 [WINDOWS_ARM64.md](WINDOWS_ARM64.md)。窗口启动修复和便携发布已在 Windows 10 22H2 x64 上确认。账号续期、外置服务和不同网络环境下的联机仍须由用户实际账号验收。
@@ -39,7 +41,7 @@ ARM64 输出为 `build/MC-Harbor-Windows-arm64-portable.zip` 与 `build/MC-Harbo
 
 打包使用独立的文件副本，包含 Java、.NET、WinUI 和本机翻译运行库。脚本排除玩家数据与调试符号，并检查启动资源、程序图标和包内文件数量。便携 ZIP 带有 `MCHarbor.portable` 标记。程序与窗口图标由仓库 `Assets/Brand/Icon.png` 生成多尺寸 ICO，侧栏使用同一份正式图稿。
 
-发行包位于 build/MC-Harbor-Windows-x64-portable.zip。解压后运行 MC Harbor.exe。首次使用本机 OPUS-MT 英译中补译时，程序会在用户选择后下载约 289 MB 的模型和运行库；“进阶本机补译 2B”会另行安装 llama.cpp 并下载约 1.31 GB 的量化模型。普通安装模式将模型保存在 `%LOCALAPPDATA%\MCHarbor\translation`；带有 MCHarbor.portable 标记的发行目录会保存在 `MCHarborData\translation`。模型均不预置在便携包中。
+发行包位于 build/MC-Harbor-Windows-x64-portable.zip。解压后运行 MC Harbor.exe。首次使用本机 OPUS-MT 英译中补译时，程序会在用户选择后下载约 289 MB 的模型和运行库。普通安装模式将模型保存在 `%LOCALAPPDATA%\MCHarbor\translation`；带有 MCHarbor.portable 标记的发行目录会保存在 `MCHarborData\translation`。模型均不预置在便携包中。
 
 ## 已接入功能
 
@@ -55,10 +57,10 @@ ARM64 输出为 `build/MC-Harbor-Windows-arm64-portable.zip` 与 `build/MC-Harbo
 上述同步通过 x64 调试构建及 23 项隔离回归，包含旧壁纸索引、并发导入、文件保留、快捷启动接收、重复通知和超时清理。原生预览的实际播放观感及完整快捷启动流程仍需在窗口中确认。上游记录见 [1.7.0 验收说明](https://github.com/ADsurfboard/MC-Harbor/blob/2e101df72dd97618f5cdab44bf9145c830867d1f/docs/QA-1.7.0.md) 和 [1.7.1 发布说明](https://github.com/ADsurfboard/MC-Harbor/blob/2e101df72dd97618f5cdab44bf9145c830867d1f/RELEASE_NOTES.md)。
 
 - WinUI 游戏库、实例扫描、版本与加载器安装、实例重定位、专用运行目录、游戏 Java 选择、快捷方式和普通窗口关闭。
-- Microsoft、外置认证和离线账号。导入旧 HMCL 配置时，按已选目录或文件只读解析两代配置，可恢复旧凭据或标注需要重新登录。Mac 客户端可导出加密登录迁移包，Windows 客户端解密后将凭据转入 DPAPI。
+- Microsoft、外置认证和离线账号。导入旧 HMCL 配置时，按已选目录或文件只读解析两代配置，可恢复旧凭据或标注需要重新登录；账号凭据使用 Windows DPAPI 保护。
 - 实例模组、资源包、光影、地图和存档操作。地图和世界 ZIP 导入会验证 Windows 文件名、大小写冲突、条目路径、CRC 与解压容量。存档读取、NBT 编辑和原字节备份按世界目录执行。
 - Modrinth 与 CurseForge 搜索、排序、兼容文件选择、哈希校验、必要依赖及下载暂存。实例模组可收藏为本地副本或在线项目，并在模组夹间批量管理及导入。
-- 汉化工作区包含 CFPA 社区补全、人工编辑、格式校验、导入导出和 FTB／数据包文本应用。默认机器补译为按需加载的 CPU INT8 OPUS-MT 英译中；另提供可选的 Index-Translate 2B Q4_K_M。2B 首次使用按用户确认后通过 WinGet 安装 llama.cpp，并下载固定版本模型；模型会校验 SHA-256，只绑定本机回环地址。所有本机补译都要求游戏退出，游戏启动时停止推理并在游戏退出后续跑。
+- 汉化工作区包含 CFPA 社区补全、人工编辑、格式校验、导入导出和 FTB／数据包文本应用。默认机器补译为按需加载的 CPU INT8 OPUS-MT 英译中。所有本机补译都要求游戏退出，游戏启动时停止推理并在游戏退出后续跑。
 - 好友服务、聊天、恢复密钥、邀请及动态。联网后可使用服务器直连、Terracotta 房间和 Sakura Frp。
 - 本地皮肤预览与 LittleSkin 浏览、主题、分层 GPU 磨砂与可调模糊半径、指针视差折射高光、Fluent System Icons、壁纸、欢迎语音与 JDSherbert 界面音效、性能模式、配置导入导出与游玩记录。
 
@@ -70,6 +72,6 @@ ARM64 输出为 `build/MC-Harbor-Windows-arm64-portable.zip` 与 `build/MC-Harbo
 
 现有证据包括 Windows 10 22H2 x64 上 WinUI 主窗口正常显示、同一便携应用重复打开转到已运行窗口、正常关闭进程，以及固定 HMCL 后端的版本安装、实例扫描和 Minecraft 1.20.1 离线启动。独立后端检查覆盖 NBT 读写、原件备份、路径与哈希校验、翻译占位符、CFPA 导入和 Modrinth / CurseForge 文件计划。
 
-当前提供 x64 便携 ZIP 和中文 MSI。在线账号、Mac 钥匙串迁移、Windows 11、ARM64、跨公网联机和翻译对游戏帧时间的影响仍需在目标设备验收。2B 翻译已经接入，其首次下载、译文效果和模型资源占用需要真实硬件测试。玻璃滚动修复采用固定窗口底图，并校正卡片越过窗口边缘时的壁纸取样比例。小按钮和主操作按钮具有磨砂底层、边缘高光及可调阴影。最新界面仍需人工核验滚动观感。MSI 已通过 Windows Installer 管理解包，全部程序与许可证文件均按 SHA-256 核对；便携 ZIP 的全部程序文件也已通过逐项 SHA-256 校验。发布整理另外排除了 Python 字节码缓存和本机构建路径，2B 回环连接显式禁止代理与重定向。普通安装、升级和卸载流程需要另行验收。当前本地生成的程序与安装包尚无发行证书签名。
+当前提供 x64 便携 ZIP 和中文 MSI。在线账号、Mac 钥匙串迁移、Windows 11、ARM64、跨公网联机和翻译对游戏帧时间的影响仍需在目标设备验收。玻璃滚动修复采用固定窗口底图，并校正卡片越过窗口边缘时的壁纸取样比例。小按钮和主操作按钮具有磨砂底层、边缘高光及可调阴影。最新界面仍需人工核验滚动观感。MSI 已通过 Windows Installer 管理解包，全部程序与许可证文件均按 SHA-256 核对；便携 ZIP 的全部程序文件也已通过逐项 SHA-256 校验。发布整理另外排除了 Python 字节码缓存和本机构建路径。普通安装、升级和卸载流程需要另行验收。当前本地生成的程序与安装包尚无发行证书签名。
 
 只在 windows 分支提交 Windows 工作。跨平台公共改动按上游流程交由 ADsurfboard 审核。Windows 专用标签使用 windows-*。项目分工与署名见 [GOVERNANCE.md](../GOVERNANCE.md)。

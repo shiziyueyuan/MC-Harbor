@@ -8,8 +8,6 @@ using Windows.Foundation;
 
 namespace MCHarbor.Windows.Controls;
 
-public enum HarborGlassBlurGroup { Default, AccountList, AccountDetails }
-
 public sealed class HarborGlassCard : ContentControl
 {
     private const int ShadowPadding = 24;
@@ -18,6 +16,7 @@ public sealed class HarborGlassCard : ContentControl
     private Image? _shadow;
     private Border? _film;
     private Border? _highlight;
+    private Border? _stroke;
     private RadialGradientBrush? _highlightBrush;
     private MainWindow? _host;
     private bool _interactive;
@@ -25,7 +24,7 @@ public sealed class HarborGlassCard : ContentControl
 
     public HarborGlassCard()
     {
-        SizeChanged += (_, _) => InvalidateGlass();
+        SizeChanged += (_, _) => { UpdateDecorationBounds(); InvalidateGlass(); };
         Loaded += (_, _) =>
         {
             _host = FindGlassHost();
@@ -51,7 +50,6 @@ public sealed class HarborGlassCard : ContentControl
         PointerCanceled += (_, _) => SetHighlight(new Point(0.28, 0.12), 8);
     }
 
-    public HarborGlassBlurGroup BlurGroup { get; set; }
     internal float EdgeAmount { get; private set; } = 8;
     internal bool HasSurface => _surface is not null;
     internal bool IsInViewport => _effectiveViewport is not { } viewport
@@ -84,8 +82,27 @@ public sealed class HarborGlassCard : ContentControl
         _shadow = GetTemplateChild("ShadowImage") as Image;
         _film = GetTemplateChild("Film") as Border;
         _highlight = GetTemplateChild("Highlight") as Border;
+        _stroke = GetTemplateChild("Stroke") as Border;
         _highlightBrush = _highlight?.Background as RadialGradientBrush;
+        UpdateDecorationBounds();
         InvalidateGlass();
+    }
+
+    private void UpdateDecorationBounds()
+    {
+        var width = Math.Max(0, ActualWidth);
+        var height = Math.Max(0, ActualHeight);
+        foreach (var border in new[] { _surface, _film, _highlight, _stroke })
+        {
+            if (border is null) continue;
+            border.Width = width;
+            border.Height = height;
+        }
+        if (_shadow is null) return;
+        _shadow.Width = width + 2 * ShadowPadding;
+        _shadow.Height = height + 2 * ShadowPadding;
+        Canvas.SetLeft(_shadow, -ShadowPadding);
+        Canvas.SetTop(_shadow, -ShadowPadding);
     }
 
     internal void ApplyMaterial(Brush fill, Brush edge, double shadowOpacity, bool interactive, bool glassEnabled = false)

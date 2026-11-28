@@ -1,7 +1,6 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 using MCHarbor.Windows.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -13,6 +12,16 @@ namespace MCHarbor.Windows;
 
 public sealed partial class MainWindow
 {
+    private async void RemoveSelectedAccount_Click(object sender, RoutedEventArgs e)
+    {
+        if (AccountsList.SelectedItem is not AccountListEntry row) return;
+        var account = AccountStore.ReadAll().FirstOrDefault(item => item.Id == row.Account.Id);
+        if (account is null) return;
+        if (await FriendDialog("移除账号", new TextBlock { Text = $"从这台电脑移除 {account.Name} 的登录信息？", TextWrapping = TextWrapping.Wrap }, "移除").ShowAsync() != ContentDialogResult.Primary) return;
+        try { AccountStore.Remove(account.Id); RefreshAccounts(refreshSkin: true); }
+        catch (Exception error) { ShowStatus("账号无法移除：" + error.Message, InfoBarSeverity.Error); }
+    }
+
     private bool _skinDialogOpen;
     private readonly Dictionary<string, ImageSource> _accountAvatars = new(StringComparer.Ordinal);
     private Task<MinecraftSkin>? _defaultSkin;
@@ -235,62 +244,6 @@ public sealed partial class MainWindow
         if (selected is null) return;
         _accountAvatars[selected.Id] = source;
         if (AccountsList.SelectedItem is AccountListEntry row && row.Account.Id == selected.Id) row.Avatar = source;
-    }
-
-    private async void ImportMacMigration_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var file = await PickFileAsync(".json");
-            if (file is null) return;
-            var password = new PasswordBox { Header = "Mac 导出时设置的迁移口令", MaxLength = 512, MinWidth = 280 };
-            var dialog = FriendDialog("导入 Mac 登录迁移包",
-                new StackPanel { Spacing = 8, Children =
-                {
-                    password,
-                    new TextBlock { Text = "口令只用于解密。导入后会转存到这台 Windows 电脑的当前用户凭据中。",
-                        TextWrapping = TextWrapping.Wrap, MaxWidth = 380 }
-                } }, "解密并导入");
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-            var passphrase = password.Password;
-            password.Password = "";
-            if (passphrase.Length < 12) throw new IOException("迁移口令至少需要 12 个字符。");
-            var info = new FileInfo(file.Path);
-            if (info.Length is 0 or > 16_000_000) throw new IOException("迁移包大小超出限制。");
-            var bytes = await File.ReadAllBytesAsync(file.Path);
-            JsonObject payload;
-            try { payload = await Task.Run(() => AccountMigrationBundle.Decrypt(bytes, passphrase)); }
-            finally { CryptographicOperations.ZeroMemory(bytes); }
-            passphrase = "";
-
-            var existing = AccountStore.ReadAll().ToDictionary(account => account.Id, StringComparer.Ordinal);
-            var imported = 0;
-            var skipped = 0;
-            foreach (var value in payload["accounts"]?.AsArray() ?? [])
-            {
-                if (value is not JsonObject account) continue;
-                var id = account["metadata"]?["id"]?.GetValue<string>() ?? "";
-                if (existing.TryGetValue(id, out var saved) && !saved.RequiresReauth)
-                {
-                    skipped++;
-                    continue;
-                }
-                var stored = AccountStore.Save(account);
-                existing[stored.Id] = stored;
-                imported++;
-            }
-            RefreshAccounts();
-            var message = imported == 0
-                ? "迁移包中的账号已经导入。"
-                : $"已将 {imported} 个 Mac 登录状态保存到此 Windows 用户。";
-            if (skipped > 0) message += $" {skipped} 个现有账号保持不变。";
-            ShowStatus(message, InfoBarSeverity.Success);
-        }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or CryptographicException
-            or JsonException or InvalidOperationException)
-        {
-            ShowStatus("Mac 登录迁移失败：" + error.Message, InfoBarSeverity.Error);
-        }
     }
 
     private async void ExternalLogin_Click(object sender, RoutedEventArgs e)

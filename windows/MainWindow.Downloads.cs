@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Text.Json.Nodes;
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 using MCHarbor.Windows.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;

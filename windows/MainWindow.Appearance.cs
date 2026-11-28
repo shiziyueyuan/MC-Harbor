@@ -19,11 +19,6 @@ using Windows.UI.ViewManagement;
 
 namespace MCHarbor.Windows;
 
-public sealed record WallpaperEntry(string Name, string FileName)
-{
-    public bool Video => FileName.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase);
-}
-
 public sealed partial class MainWindow
 {
     private const int DefaultGlassTransparency = 40;
@@ -45,12 +40,10 @@ public sealed partial class MainWindow
     private DependencyObject? _lastHoverSoundTarget;
     private DateTimeOffset _lastFocusSound = DateTimeOffset.MinValue;
     private bool _appearanceReady;
-    private bool _resettingGlass;
     private bool _appearanceWindowLoaded;
     private bool _glassMotionActive;
     private bool _glassLayerActive;
     private volatile bool _playingWallpaper;
-    private bool _settingWallpaper;
     private bool _welcomePlayed;
     private bool _colorEventsAttached;
     private bool _contrastEventsAttached;
@@ -63,26 +56,28 @@ public sealed partial class MainWindow
 
     private void InitializeAppearance()
     {
-        ThemeMode.SelectedIndex = AppPaths.GetPreference("theme") switch { "light" => 1, "dark" => 2, _ => 0 };
-        InvertTheme.IsOn = PreferenceEnabled("invertTheme");
+        InitializeMacThemeSettings();
+        ThemeMode.SelectedIndex = AppPaths.GetPreference("appearance", AppPaths.GetPreference("theme", "dark")) switch { "light" => 1, "ultraClear" => 2, "theme" => 3, _ => 0 };
         GlassEnabled.IsOn = PreferenceEnabled("glass", true);
         GlassTransparency.Value = ReadSettingNumber("glassTransparency", DefaultGlassTransparency, 0, 100);
-        GlassShadow.Value = ReadSettingNumber("glassShadow", DefaultGlassShadow, 0, 100);
         GlassBlur.Value = ReadSettingNumber("glassBlur", DefaultGlassBlur, 0, 40);
-        SidebarGlassBlur.Value = ReadSettingNumber("glassSidebarBlur", GlassBlur.Value, 0, 40);
-        AccountListGlassBlur.Value = ReadSettingNumber("glassAccountListBlur", GlassBlur.Value, 0, 40);
-        AccountDetailsGlassBlur.Value = ReadSettingNumber("glassAccountDetailsBlur", GlassBlur.Value, 0, 40);
-        WallpaperDimming.Value = ReadSettingNumber("wallpaperDimming", 16, 0, 75);
         WallpaperSoftness.Value = ReadSettingNumber("wallpaperSoftness", 0, 0, 24);
+        WindowTransparency.Value = ReadSettingNumber("windowTransparency", 86, 0, 100);
+        DownloadThreads.Value = ReadSettingNumber("downloadThreads", 8, 4, 24);
+        PostLaunchMode.SelectedIndex = AppPaths.GetPreference("postLaunch", "keep") switch { "hide" => 1, "quit" => 2, _ => 0 };
         ReduceMotion.IsOn = PreferenceEnabled("reduceMotion");
-        PerformanceMode.IsOn = PreferenceEnabled("performanceMode", true);
+        PerformanceMode.IsOn = PreferenceEnabled("performanceMode", false);
         WelcomeVoice.SelectedIndex = (int)ReadSettingNumber("welcomeVoice", 1, 0, 4);
         WelcomeVolume.Value = ReadSettingNumber("welcomeVolume", 65, 0, 100);
         InterfaceSounds.IsOn = PreferenceEnabled("interfaceSounds", true);
         InterfaceVolume.Value = ReadSettingNumber("interfaceVolume", 48, 0, 100);
-        GameMemory.Value = ReadSettingNumber("gameMemory", 3072, 1024, 6144);
+        GameMemory.SelectedIndex = Math.Clamp((int)Math.Round(ReadSettingNumber("gameMemory", 3072, 2048, 6144) / 1024) - 2, 0, 4);
+        GlobalGameJava.Text = AppPaths.GetPreference("gameJava");
+        TranslationProvider.SelectedIndex = (int)ReadSettingNumber("translationProvider", 0, 0, 3);
+        TranslationQwenEndpoint.Text = AppPaths.GetPreference("translationQwenEndpoint", OnlineTranslationClient.QwenAddress(null).AbsoluteUri);
+        UpdateTranslationSettings();
         CompleteDependencies.IsOn = PreferenceEnabled("completeDependencies");
-        DownloadSource.SelectedIndex = AppPaths.GetPreference("downloadSource") == "official" ? 1 : 0;
+        DownloadSource.SelectedIndex = AppPaths.GetPreference("downloadSource") switch { "official" => 1, "mirror" => 2, _ => 0 };
         DataDirectoryText.Text = AppPaths.DataDirectory;
         WindowsVersionText.Text = $"MC Harbor for Windows {AppPaths.Version} · {WindowsPlatform.ClientArchitecture.ToUpperInvariant()}";
 
@@ -117,7 +112,7 @@ public sealed partial class MainWindow
         _welcomePlayed = true;
         await RefreshWallpaperLibraryAsync();
         PlayInterfaceSound("startup");
-        PlayWelcome();
+        if (!PerformanceMode.IsOn) PlayWelcome();
     }
 
     private static bool PreferenceEnabled(string name, bool fallback = false) =>
@@ -130,7 +125,7 @@ public sealed partial class MainWindow
     private void ThemeMode_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (!_appearanceReady) return;
-        SaveSetting("theme", ThemeMode.SelectedIndex switch { 1 => "light", 2 => "dark", _ => "system" });
+        SaveSetting("appearance", ThemeMode.SelectedIndex switch { 1 => "light", 2 => "ultraClear", 3 => "theme", _ => "dark" });
         ApplyTheme();
     }
 
@@ -139,7 +134,7 @@ public sealed partial class MainWindow
         if (!_appearanceReady || sender is not ToggleSwitch toggle) return;
         var key = toggle.Name switch
         {
-            nameof(InvertTheme) => "invertTheme", nameof(GlassEnabled) => "glass",
+            nameof(GlassEnabled) => "glass",
             nameof(ReduceMotion) => "reduceMotion", nameof(PerformanceMode) => "performanceMode",
             nameof(InterfaceSounds) => "interfaceSounds",
             nameof(CompleteDependencies) => "completeDependencies", _ => ""
@@ -160,68 +155,22 @@ public sealed partial class MainWindow
 
     private void GlassMaterial_Changed(object sender, RangeBaseValueChangedEventArgs e)
     {
-        if (!_appearanceReady || _resettingGlass || sender is not Slider slider) return;
+        if (!_appearanceReady || sender is not Slider slider) return;
         var key = slider.Name switch
         {
             nameof(GlassTransparency) => "glassTransparency",
-            nameof(GlassShadow) => "glassShadow",
             nameof(GlassBlur) => "glassBlur",
-            nameof(SidebarGlassBlur) => "glassSidebarBlur",
-            nameof(AccountListGlassBlur) => "glassAccountListBlur",
-            nameof(AccountDetailsGlassBlur) => "glassAccountDetailsBlur",
             _ => ""
         };
         if (key.Length == 0) return;
         SaveSetting(key, ((int)e.NewValue).ToString(CultureInfo.InvariantCulture));
-        if (ReferenceEquals(slider, GlassBlur)) UpdateInheritedGlassBlur();
-        if (ReferenceEquals(slider, GlassShadow)) UpdateGlassShadowOpacity();
-        else ApplyTheme();
-    }
-
-    private void UpdateInheritedGlassBlur()
-    {
-        _resettingGlass = true;
-        try
-        {
-            foreach (var (slider, preference) in new[]
-            {
-                (SidebarGlassBlur, "glassSidebarBlur"),
-                (AccountListGlassBlur, "glassAccountListBlur"),
-                (AccountDetailsGlassBlur, "glassAccountDetailsBlur")
-            })
-                if (AppPaths.GetPreference(preference).Length == 0) slider.Value = GlassBlur.Value;
-        }
-        finally { _resettingGlass = false; }
-    }
-
-    private void ResetGlass_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            AppPaths.SetPreferences(
-                ("glassTransparency", null), ("glassShadow", null), ("glassBlur", null),
-                ("glassSidebarBlur", null), ("glassAccountListBlur", null), ("glassAccountDetailsBlur", null));
-        }
-        catch (Exception error)
-        {
-            ShowStatus("设置无法保存：" + error.Message, InfoBarSeverity.Error);
-            return;
-        }
-        _resettingGlass = true;
-        try
-        {
-            GlassTransparency.Value = DefaultGlassTransparency;
-            GlassShadow.Value = DefaultGlassShadow;
-            SidebarGlassBlur.Value = AccountListGlassBlur.Value = AccountDetailsGlassBlur.Value = GlassBlur.Value = DefaultGlassBlur;
-        }
-        finally { _resettingGlass = false; }
         ApplyTheme();
     }
 
     private void WallpaperTuning_Changed(object sender, RangeBaseValueChangedEventArgs e)
     {
         if (!_appearanceReady) return;
-        SaveSetting(ReferenceEquals(sender, WallpaperDimming) ? "wallpaperDimming" : "wallpaperSoftness",
+        SaveSetting("wallpaperSoftness",
             ((int)e.NewValue).ToString(CultureInfo.InvariantCulture));
         QueueBackdropRefresh();
     }
@@ -247,13 +196,13 @@ public sealed partial class MainWindow
 
     private void DownloadSource_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (_appearanceReady) SaveSetting("downloadSource", DownloadSource.SelectedIndex == 1 ? "official" : "auto");
+        if (_appearanceReady) SaveSetting("downloadSource", DownloadSource.SelectedIndex switch { 1 => "official", 2 => "mirror", _ => "auto" });
     }
 
-    private void GameMemory_Changed(NumberBox sender, NumberBoxValueChangedEventArgs e)
+    private void GameMemory_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (_appearanceReady && double.IsFinite(e.NewValue))
-            SaveSetting("gameMemory", ((int)Math.Clamp(e.NewValue, 1024, 6144)).ToString(CultureInfo.InvariantCulture));
+        if (_appearanceReady && GameMemory.SelectedIndex >= 0)
+            SaveSetting("gameMemory", ((GameMemory.SelectedIndex + 2) * 1024).ToString(CultureInfo.InvariantCulture));
     }
 
     private void SaveSetting(string key, string value)
@@ -276,20 +225,18 @@ public sealed partial class MainWindow
     }
 
     private bool AllowsAmbientAnimation() => !ReduceMotion.IsOn && _uiSettings.AnimationsEnabled
-        && !_accessibility.HighContrast && (!PerformanceMode.IsOn || _runningGameRunDirectory is null)
+        && !_accessibility.HighContrast && !PerformanceMode.IsOn && AppWindow.IsVisible
         && AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
 
     private void ApplyTheme()
     {
         var systemBackground = _uiSettings.GetColorValue(UIColorType.Background);
-        var dark = ThemeMode.SelectedIndex == 2 || (ThemeMode.SelectedIndex == 0
-            && systemBackground.R + systemBackground.G + systemBackground.B < 384);
-        if (InvertTheme.IsOn) dark = !dark;
-        RootShell.RequestedTheme = ThemeMode.SelectedIndex == 0 && !InvertTheme.IsOn
-            ? ElementTheme.Default : dark ? ElementTheme.Dark : ElementTheme.Light;
+        var dark = ThemeMode.SelectedIndex is 0 or 2;
+        RootShell.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
         var highContrast = _accessibility.HighContrast;
         _chromeHighContrast = highContrast;
-        _glassLayerActive = GlassEnabled.IsOn && _uiSettings.AdvancedEffectsEnabled && !highContrast;
+        _glassLayerActive = _uiSettings.AdvancedEffectsEnabled && !highContrast;
+        GlassTransparency.IsEnabled = !GlassEnabled.IsOn;
         _glassMotionActive = _glassLayerActive && _chromeActive && AllowsAmbientAnimation();
         ApplyHarborPalette(dark, highContrast, systemBackground);
         UpdateAccountSkinOptions();
@@ -324,23 +271,10 @@ public sealed partial class MainWindow
         try
         {
             _wallpapers = WallpaperLibrary.Read();
-            _settingWallpaper = true;
-            WallpaperSelector.ItemsSource = new[] { new WallpaperEntry("Harbor 渐变", "") }.Concat(_wallpapers).ToArray();
-            WallpaperSelector.SelectedItem = _wallpapers.FirstOrDefault(item => item.FileName == AppPaths.GetPreference("wallpaper"))
-                ?? ((WallpaperEntry[])WallpaperSelector.ItemsSource)[0];
-            _settingWallpaper = false;
-            if (applyWallpaper) await ApplyWallpaperAsync(WallpaperSelector.SelectedItem as WallpaperEntry);
+            var selected = _wallpapers.FirstOrDefault(item => item.FileName == AppPaths.GetPreference("wallpaper"));
+            if (applyWallpaper) await ApplyWallpaperAsync(selected);
         }
         catch (Exception error) { ShowStatus("壁纸库无法读取：" + error.Message, InfoBarSeverity.Warning); }
-        finally { _settingWallpaper = false; }
-    }
-
-    private async void Wallpaper_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_appearanceReady || _settingWallpaper) return;
-        var entry = WallpaperSelector.SelectedItem as WallpaperEntry;
-        SaveSetting("wallpaper", entry?.FileName ?? "");
-        await ApplyWallpaperAsync(entry);
     }
 
     private async Task ApplyWallpaperAsync(WallpaperEntry? entry)
@@ -506,38 +440,6 @@ public sealed partial class MainWindow
         {
             Interlocked.Exchange(ref _wallpaperFrameQueued, 0);
         }
-    }
-
-    private async void ImportWallpaper_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            var file = await PickFileAsync(".png", ".jpg", ".jpeg", ".bmp", ".mp4");
-            if (file is null) return;
-            var extension = Path.GetExtension(file.Name).ToLowerInvariant();
-            if (extension is not (".png" or ".jpg" or ".jpeg" or ".bmp" or ".mp4"))
-                throw new IOException("请选择图片或 MP4。");
-            var name = new TextBox { Header = "壁纸名称", Text = Path.GetFileNameWithoutExtension(file.Name), MaxLength = 80 };
-            if (await FriendDialog("导入壁纸", name, "导入").ShowAsync() != ContentDialogResult.Primary) return;
-            var label = name.Text.Trim();
-            if (label.Length == 0) throw new IOException("请输入壁纸名称。");
-            var entry = await WallpaperLibrary.ImportAsync(file.Path, label);
-            SaveSetting("wallpaper", entry.FileName);
-            await RefreshWallpaperLibraryAsync();
-        }
-        catch (Exception error) { ShowStatus("壁纸导入失败：" + error.Message, InfoBarSeverity.Error); }
-    }
-
-    private async void RemoveWallpaper_Click(object sender, RoutedEventArgs e)
-    {
-        if (WallpaperSelector.SelectedItem is not WallpaperEntry { FileName.Length: > 0 } entry) return;
-        try
-        {
-            var dialog = FriendDialog("移除壁纸", new TextBlock { Text = $"从启动器壁纸库移除 {entry.Name}？" }, "移除");
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-            await RemoveLibraryWallpaperAsync(entry);
-        }
-        catch (Exception error) { ShowStatus("壁纸移除失败：" + error.Message, InfoBarSeverity.Error); }
     }
 
     private void PreviewWelcome_Click(object sender, RoutedEventArgs e) => PlayWelcome();

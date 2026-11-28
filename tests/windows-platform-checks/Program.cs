@@ -8,6 +8,12 @@ if (args.Contains("-cp"))
 {
     var request = await Console.In.ReadLineAsync();
     using var json = JsonDocument.Parse(request!);
+    if (json.RootElement.GetProperty("command").GetString() == "fixtureVmFailure")
+    {
+        Console.WriteLine("Error occurred during initialization of VM");
+        Console.Error.WriteLine("synthetic-private-diagnostic");
+        Environment.Exit(1);
+    }
     var cp = args[Array.IndexOf(args, "-cp") + 1];
     Console.WriteLine(JsonSerializer.Serialize(new { @event = "result", data = new
     {
@@ -71,6 +77,8 @@ try
         var assembly = typeof(WindowsPlatform).Assembly.Location;
         File.Copy(host, Path.Combine(folder, "java.exe"));
         File.Copy(assembly, Path.Combine(folder, Path.GetFileName(assembly)));
+        var core = typeof(MCHarbor.Core.Services.IBridgeClient).Assembly.Location;
+        File.Copy(core, Path.Combine(folder, Path.GetFileName(core)));
         foreach (var suffix in new[] { ".runtimeconfig.json", ".deps.json" })
         {
             var file = Path.ChangeExtension(assembly, null) + suffix;
@@ -81,6 +89,16 @@ try
     var nativeJava = CopyHost(Path.Combine(temporary, "Runtime", "bin"));
     Check(JavaRuntimeLocator.FindLauncherJava() == nativeJava, "Bundled native Java preferred");
     var bridge = new BridgeClient(nativeJava);
+    try
+    {
+        await bridge.InvokeAsync("fixtureVmFailure");
+        throw new InvalidOperationException("VM initialization failure was not detected.");
+    }
+    catch (BridgeException error)
+    {
+        Check(error.Message.Contains("Java 运行时初始化失败") && !error.Message.Contains("synthetic-private-diagnostic"),
+            "VM startup failure reports a useful error without exposing diagnostic content");
+    }
     var rejected = false;
     try { await bridge.InvokeAsync("launch"); } catch (BridgeException) { rejected = true; }
     Check(rejected, "Missing compatibility runtime fails before launch");

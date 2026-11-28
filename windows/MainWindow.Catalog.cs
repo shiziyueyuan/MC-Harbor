@@ -1,6 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 using MCHarbor.Windows.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -237,12 +237,11 @@ public sealed partial class MainWindow
 
     private async Task WaitForGameDirectoryAsync(GameInstance instance, TextBlock status, DownloadJob job, CancellationToken cancellation)
     {
-        while (_launchTask is { IsCompleted: false } game && _runningGameRunDirectory is { } current
-            && GameDirectoryKey(current).Equals(GameDirectoryKey(instance.RunDirectory), StringComparison.OrdinalIgnoreCase))
+        while (_gameSessions.TryGetValue(GameDirectoryKey(instance.RunDirectory), out var session))
         {
             status.Text = "文件已准备好。等待此实例退出后安装…";
             job.Report(status.Text);
-            await game.WaitAsync(cancellation);
+            await session.Finished.Task.WaitAsync(cancellation);
         }
         cancellation.ThrowIfCancellationRequested();
     }

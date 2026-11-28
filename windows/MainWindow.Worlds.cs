@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 using MCHarbor.Windows.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -13,13 +13,12 @@ public sealed partial class MainWindow
         new(JavaRuntimeLocator.FindLauncherJava() ?? throw new BridgeException("找不到随程序提供的 Java 21 运行时。"));
 
     private static string GameDirectoryKey(string path) =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        GameSessionStore.CanonicalDirectory(path);
 
     private string BeginGameDirectoryWrite(GameInstance instance)
     {
         var run = GameDirectoryKey(instance.RunDirectory);
-        if (_launchTask is { IsCompleted: false } && _runningGameRunDirectory is { } running
-            && string.Equals(run, GameDirectoryKey(running), StringComparison.OrdinalIgnoreCase))
+        if (IsRunningInstance(instance))
             throw new IOException("此游戏目录正在启动或运行，请退出游戏后再试。");
         EnsureOrdinaryDirectory(run);
         if (!_gameDirectoryWrites.Add(run))

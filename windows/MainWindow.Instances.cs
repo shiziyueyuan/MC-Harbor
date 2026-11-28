@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 using MCHarbor.Windows.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -67,7 +67,7 @@ public sealed partial class MainWindow
         FeaturedGameCard.Visibility = selected is null ? Visibility.Collapsed : Visibility.Visible;
         if (selected is null) return;
         FeaturedGameLoader.Text = selected.Loader == "vanilla" ? "Minecraft" : selected.Loader;
-        FeaturedGameName.Text = selected.Id;
+        FeaturedGameName.Text = selected.FriendlyName;
         FeaturedGameVersion.Text = selected.Version;
         FeaturedGameIcon.Source = new BitmapImage(new Uri(selected.Artwork));
         FeaturedGameLaunch.Tag = FeaturedGameManage.Tag = selected.Id;
@@ -86,16 +86,16 @@ public sealed partial class MainWindow
     private void UpdateFeaturedLaunch()
     {
         if (FeaturedGameLaunch is null) return;
-        var idle = _runningGameRunDirectory is null;
         var featured = InstanceList.SelectedItem as GameInstance;
-        FeaturedGameLaunch.IsEnabled = WorkspaceLaunchButton.IsEnabled = idle;
-        FeaturedGameLaunch.Content = WorkspaceLaunchButton.Content = idle ? "启动游戏" : "游戏运行中";
-        FeaturedGameStop.Visibility = VisibleWhen(StopGameButton.IsEnabled && IsRunningInstance(featured));
-        WorkspaceStopButton.Visibility = VisibleWhen(StopGameButton.IsEnabled && IsRunningInstance(_activeModsInstance));
+        FeaturedGameLaunch.IsEnabled = featured is not null && !IsRunningInstance(featured);
+        WorkspaceLaunchButton.IsEnabled = !IsRunningInstance(_activeModsInstance);
+        FeaturedGameLaunch.Content = IsRunningInstance(featured) ? "运行中" : "启动游戏";
+        WorkspaceLaunchButton.Content = IsRunningInstance(_activeModsInstance) ? "运行中" : "启动";
+        FeaturedGameStop.Tag = featured?.Id;
+        WorkspaceStopButton.Tag = _activeModsInstance?.Id;
+        FeaturedGameStop.Visibility = VisibleWhen(IsRunningInstance(featured));
+        WorkspaceStopButton.Visibility = VisibleWhen(IsRunningInstance(_activeModsInstance));
     }
-
-    private bool IsRunningInstance(GameInstance? instance) => instance is not null
-        && string.Equals(instance.RunDirectory, _runningGameRunDirectory, StringComparison.OrdinalIgnoreCase);
 
     private static HashSet<string> ReadFavoriteInstances()
     {
@@ -153,6 +153,7 @@ public sealed partial class MainWindow
             if (choice == ContentDialogResult.Secondary)
             {
                 AppPaths.SetPreference(JavaPreferenceKey(instance), "");
+                if (_activeModsInstance?.Directory == instance.Directory) InstanceJavaPath.Text = "";
                 ShowStatus("已恢复自动选择游戏 Java。", InfoBarSeverity.Success);
                 return;
             }
@@ -167,6 +168,7 @@ public sealed partial class MainWindow
             if (inspection["compatibleArchitecture"]?.GetValue<bool>() != true)
                 throw new IOException("所选 Java 架构与此 Windows 客户端不匹配。");
             AppPaths.SetPreference(JavaPreferenceKey(instance), file.Path);
+            if (_activeModsInstance?.Directory == instance.Directory) InstanceJavaPath.Text = file.Path;
             ShowStatus($"已为 {instance.Id} 选用 Java {inspection["version"]}。", InfoBarSeverity.Success);
         }
         catch (Exception error) { ShowStatus("无法更改游戏 Java：" + error.Message, InfoBarSeverity.Error); }
@@ -177,7 +179,7 @@ public sealed partial class MainWindow
         if (MenuInstance(sender) is not { } instance) return;
         try
         {
-            if (_launchTask is { IsCompleted: false } || _gameDirectoryWrites.Count > 0)
+            if (HasRunningGames || _gameDirectoryWrites.Count > 0)
                 throw new IOException("请在游戏及文件操作结束后更改目录。");
             var content = new TextBlock
             {
@@ -215,7 +217,11 @@ public sealed partial class MainWindow
                 || System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(16, 4)) is 0 or > 4096
                 || System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(20, 4)) is 0 or > 4096)
                 throw new IOException("请选择宽高不超过 4096 像素的 PNG。");
-            AccountStore.WriteAtomically(Path.Combine(instance.Directory, "icon.png"), bytes);
+            var directory = Path.Combine(AppPaths.DataDirectory, "instance-icons");
+            var name = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(instance.Directory.ToUpperInvariant()))) + ".png";
+            var destination = Path.Combine(directory, name);
+            AccountStore.WriteAtomically(destination, bytes);
+            SaveSetting(InstanceIconKey(instance), destination);
             await RefreshInstancesAsync();
         }
         catch (Exception error) { ShowStatus("无法更换图标：" + error.Message, InfoBarSeverity.Error); }
@@ -258,7 +264,7 @@ public sealed partial class MainWindow
         if (MenuInstance(sender) is not { } instance) return;
         try
         {
-            if (_launchTask is { IsCompleted: false } || _catalogTask is { IsCompleted: false } || _gameDirectoryWrites.Count > 0)
+            if (HasRunningGames || _catalogTask is { IsCompleted: false } || _gameDirectoryWrites.Count > 0)
                 throw new IOException("请先结束游戏和资源任务。");
             var versions = GameDirectoryKey(Path.Combine(AppPaths.GameRoot, "versions"));
             var target = GameDirectoryKey(instance.Directory);
@@ -275,7 +281,7 @@ public sealed partial class MainWindow
             }, "移到回收站");
             dialog.DefaultButton = ContentDialogButton.Close;
             if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
-            if (_launchTask is { IsCompleted: false } || _catalogTask is { IsCompleted: false } || _gameDirectoryWrites.Count > 0)
+            if (HasRunningGames || _catalogTask is { IsCompleted: false } || _gameDirectoryWrites.Count > 0)
                 throw new IOException("请先结束游戏和资源任务。");
             var request = new SHFILEOPSTRUCT
             {

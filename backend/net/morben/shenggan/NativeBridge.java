@@ -27,6 +27,7 @@ import java.nio.file.*;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.*;
 
@@ -139,7 +140,12 @@ public final class NativeBridge {
     }
     @SuppressWarnings("unchecked") private static Map<String,Object> resources()throws Exception{
         Path run=Path.of(text("runDirectory",""));List<Map<String,Object>> items=new ArrayList<>();String id=validName(text("id",""));var manager=repository.getModManager(id);manager.refresh();
-        for(var mod:manager.getLocalFiles())items.add(NativeResourceFiles.item(mod.getFile(),"mods",Objects.toString(mod.getName(),mod.getFileName()),mod.getLogoPath(),mod.getUrl(),data));
+        for(var mod:manager.getLocalFiles()){
+            Map<String,Object> item=NativeResourceFiles.item(mod.getFile(),"mods",Objects.toString(mod.getName(),mod.getFileName()),mod.getLogoPath(),mod.getUrl(),data);
+            item.put("version",Objects.toString(mod.getVersion(),""));
+            item.put("authors",Objects.toString(mod.getAuthors(),""));
+            items.add(item);
+        }
         for(String kind:List.of("resourcepacks","shaderpacks","saves")){Path folder=run.resolve(kind);if(!Files.isDirectory(folder))continue;try(var paths=Files.list(folder)){for(Path file:paths.filter(p->!p.getFileName().toString().startsWith(".")&&!Files.isSymbolicLink(p)).sorted().toList()){if(Files.isDirectory(file)||file.getFileName().toString().matches(".*\\.(zip|disabled)"))items.add(NativeResourceFiles.item(file,kind,file.getFileName().toString(),kind.equals("saves")?"icon.png":null,null,data));}}}
         return NativeResourceFiles.index(items,run,data,request.has("resolve")&&request.get("resolve").getAsBoolean());
     }
@@ -198,7 +204,7 @@ public final class NativeBridge {
         if(required==null)required=GameJavaVersion.JAVA_8;
         if(request.has("javaExplicit")&&request.get("javaExplicit").getAsBoolean()){
             String selectedPath=text("gameJava","");if(selectedPath.isBlank())throw new IOException("请先选择此实例使用的 Java。");
-            JavaRuntime selected=readJava(Path.of(selectedPath));if(selected.getParsedVersion()!=required.majorVersion())throw new IOException("此实例需要 Java "+required.majorVersion());if(!javaArchitectureMatches(selected))throw new IOException("所选 Java 与游戏运行环境架构不匹配；Windows ARM64 版当前使用 x64 Java 兼容模式启动游戏。");return selected;
+            JavaRuntime selected=readJava(Path.of(selectedPath));if(selected.getParsedVersion()!=required.majorVersion())throw new IOException("此实例需要 Java "+required.majorVersion());if(!javaArchitectureMatches(selected))throw new IOException("所选 Java 的平台或架构与游戏运行环境不匹配。");return selected;
         }
         List<Path> candidates=new ArrayList<>();
         String selectedPath=text("gameJava","");if(!selectedPath.isBlank())candidates.add(Path.of(selectedPath));
@@ -217,6 +223,16 @@ public final class NativeBridge {
                 }
             }
         }
+        if(!isWindows()&&!isMacOS()){
+            String path=System.getenv("PATH");
+            if(path!=null)for(String entry:path.split(java.util.regex.Pattern.quote(File.pathSeparator)))
+                if(!entry.isBlank())candidates.add(Path.of(entry).resolve("java"));
+            for(Path parent:List.of(Path.of("/usr/lib/jvm"),Path.of(System.getProperty("user.home"),".jdks"),Path.of(System.getProperty("user.home"),".sdkman","candidates","java"))){
+                if(!Files.isDirectory(parent))continue;
+                try(var entries=Files.list(parent)){for(Path entry:entries.filter(Files::isDirectory).limit(64).toList())candidates.add(javaBinary(entry));}
+                catch(IOException ignored){}
+            }
+        }
         Platform gamePlatform=gameRuntimePlatform();
         HMCLJavaRepository originalRuntimes=new HMCLJavaRepository(hmclUserHome().resolve("java"));Path originalCached=originalRuntimes.getJavaExecutable(gamePlatform,required);if(originalCached!=null)candidates.add(0,originalCached);
         HMCLJavaRepository runtimes=new HMCLJavaRepository(data.resolve("java"));Path cached=runtimes.getJavaExecutable(gamePlatform,required);if(cached!=null)candidates.add(0,cached);
@@ -229,7 +245,7 @@ public final class NativeBridge {
         return compatibleJava(required);
     }
     private static boolean javaArchitectureMatches(JavaRuntime java) {
-        return !isWindows() || java.getPlatform().equals(Platform.CURRENT_PLATFORM);
+        return isMacOS() || java.getPlatform().equals(gameRuntimePlatform());
     }
     static Platform gameRuntimePlatform() {
         // The chosen game bridge determines native libraries and Java architecture together.
@@ -246,10 +262,48 @@ public final class NativeBridge {
         if(request.has("account")){JsonObject stored=request.getAsJsonObject("account");Account account=restore(text("accountType","offline"),stored.getAsJsonObject("hmclMetadata"),stored.getAsJsonObject("privateData"));authentication=account.logIn();emit(Map.of("event","accountUpdated","data",serialize(account,text("accountType","offline"))));}
         else{String name=text("username","");if(!name.matches("[A-Za-z0-9_]{3,16}"))throw new IOException("离线用户名无效");UUID uuid;try{uuid=UUID.fromString(text("uuid",""));}catch(IllegalArgumentException e){uuid=UUID.nameUUIDFromBytes(("OfflinePlayer:"+name).getBytes(StandardCharsets.UTF_8));}authentication=new AuthInfo(name,uuid,"0",AuthInfo.USER_TYPE_LEGACY,"{}");}
         JavaRuntime java=gameJava(version);LaunchOptions options=new LaunchOptions.Builder().setGameDir(repository.getRunDirectory(id)).setJava(java).setVersionName(id).setVersionType("MC Harbor").setProfileName(id).setMaxMemory(Math.max(1024,Math.min(6144,integer("memory",3072)))).setWidth(Math.max(640,Math.min(7680,integer("width",1280)))).setHeight(Math.max(480,Math.min(4320,integer("height",800)))).setFullscreen(request.has("fullscreen")&&request.get("fullscreen").getAsBoolean()).setJavaArguments(StringUtils.tokenize(text("jvmArguments",""))).setDaemon(true).setAllowAutoAgent(true).setQuickPlayOption(text("serverAddress","").isBlank()?null:new org.jackhuang.hmcl.game.QuickPlayOption.MultiPlayer(validServer(text("serverAddress","")))).create();
-        Files.createDirectories(data.resolve("logs"));PrintWriter gameLog=new PrintWriter(Files.newBufferedWriter(data.resolve("logs").resolve("game-"+System.currentTimeMillis()+".log"),StandardCharsets.UTF_8));
-        ProcessListener listener=new ProcessListener(){@Override public synchronized void onLog(String line,boolean error){gameLog.println(line);gameLog.flush();}@Override public void onExit(int code,ExitType type){gameLog.close();}};
-        Path stop=NativeGameControl.stopPath(data,text("stopFile",""));
-        stage("启动游戏");ManagedProcess process=new DefaultLauncher(repository,version,authentication,options,listener,true).launch();emit(Map.of("event","launched","pid",process.getProcess().pid()));NativePlayHistory history=null;try{if(request.has("historySessionID"))history=new NativePlayHistory(data,text("historySessionID",""),repository.getRunDirectory(id),process.getProcess().pid());}catch(Exception error){System.err.println("Playtime receipt unavailable");}int exit;try{exit=NativeGameControl.waitFor(process.getProcess(),stop);}finally{if(history!=null)history.close();}return Map.of("id",id,"exitCode",exit);
+        Path runDirectory = repository.getRunDirectory(id);
+        Files.createDirectories(runDirectory);
+        try (NativeGameControl control = new NativeGameControl(data, runDirectory, text("stopFile", ""))) {
+            control.checkPendingStop();
+            Files.createDirectories(data.resolve("logs"));
+            PrintWriter gameLog = new PrintWriter(Files.newBufferedWriter(
+                    Files.createTempFile(data.resolve("logs"), "game-", ".log"), StandardCharsets.UTF_8));
+            var logClosed = new CountDownLatch(1);
+            ProcessListener listener = new ProcessListener() {
+                @Override public synchronized void onLog(String line, boolean error) {
+                    gameLog.println(line);
+                    gameLog.flush();
+                }
+                @Override public void onExit(int code, ExitType type) {
+                    gameLog.close();
+                    logClosed.countDown();
+                }
+            };
+            ManagedProcess process;
+            try {
+                stage("启动游戏");
+                process = new DefaultLauncher(repository, version, authentication, options, listener, true).launch();
+            } catch (Exception error) {
+                gameLog.close();
+                throw error;
+            }
+            control.record(id, process.getProcess());
+            emit(Map.of("event", "launched", "pid", process.getProcess().pid()));
+            NativePlayHistory history = null;
+            if (request.has("historySessionID")) {
+                try { history = new NativePlayHistory(data, text("historySessionID", ""), runDirectory, process.getProcess().pid()); }
+                catch (Exception error) { System.err.println("Playtime receipt unavailable"); }
+            }
+            try {
+                int exit = control.waitFor(process.getProcess());
+                // The pumps finish writing before the bridge exits, even after the app window closes.
+                logClosed.await(2, TimeUnit.SECONDS);
+                return Map.of("id", id, "exitCode", exit);
+            } finally {
+                if (history != null) history.close();
+            }
+        }
     }
     private static Map<String,Object> importPack()throws Exception{
         String name=validName(text("name",""));if(Files.exists(repository.getVersionRoot(name)))throw new IOException("实例目录已存在，未覆盖");Path file=Path.of(text("file",""));

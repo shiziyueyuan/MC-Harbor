@@ -24,13 +24,14 @@
     <RootNamespace>MCHarbor.Windows</RootNamespace>
     <AssemblyName>MC Harbor</AssemblyName>
     <ApplicationTitle>MC Harbor</ApplicationTitle>
-    <Version>1.7.1.1</Version>
+    <Version>1.7.2</Version>
     <Deterministic>true</Deterministic>
     <PathMap>$(MSBuildProjectDirectory)=/_/windows</PathMap>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\shared\MCHarbor.Core\MCHarbor.Core.csproj" GlobalPropertiesToRemove="BaseIntermediateOutputPath;MSBuildProjectExtensionsPath" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.4" />
     <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
   </ItemGroup>
@@ -40,6 +41,7 @@
     <None Update="Assets\App.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\Assets\Brand\Mark.png" Link="Assets\Brand\Mark.png" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\Assets\Brand\Mark.png')" />
     <Content Include="..\Assets\Skins\wide\steve.png" Link="Assets\Skins\wide\steve.png" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\Assets\Skins\wide\steve.png')" />
+    <Content Include="..\Assets\Contributors\*" Link="Assets\Contributors\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="..\Assets\Services.json" Link="Assets\Services.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\Assets\Voice\*.mp3" Link="Assets\Voice\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\Assets\Fonts\FluentSystemIcons-Regular.ttf" Link="Assets\Fonts\FluentSystemIcons-Regular.ttf" CopyToOutputDirectory="PreserveNewest" />
@@ -59,8 +61,9 @@
     <Content Include="$(HMCL_FX_DIR)\javafx-controls-21.0.8-win.jar" Link="Backend\javafx\javafx-controls.jar" CopyToOutputDirectory="PreserveNewest" Condition="'$(HMCL_FX_DIR)' != '' and Exists('$(HMCL_FX_DIR)\javafx-controls-21.0.8-win.jar')" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="$(HarborRuntimeDirectory)\**\*" Link="Runtime\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(HarborRuntimeDirectory)')" />
-    <Content Include="$(HarborGameRuntimeDirectory)\**\*" Link="Compatibility\JavaX64\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="'$(RuntimeIdentifier)' == 'win-arm64' and Exists('$(HarborGameRuntimeDirectory)')" />
+    <!-- Runtime distributions can reuse filenames with older timestamps; copying by date can mix incompatible JDK binaries and modules. -->
+    <Content Include="$(HarborRuntimeDirectory)\**\*" Link="Runtime\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" Condition="Exists('$(HarborRuntimeDirectory)')" />
+    <Content Include="$(HarborGameRuntimeDirectory)\**\*" Link="Compatibility\JavaX64\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" Condition="'$(RuntimeIdentifier)' == 'win-arm64' and Exists('$(HarborGameRuntimeDirectory)')" />
     <None Include="..\build\translation-python\tools\**\*"
           Exclude="..\build\translation-python\tools\**\__pycache__\**;..\build\translation-python\tools\**\*.pyc;..\build\translation-python\tools\**\*.pyo"
           Link="Translation\Python\%(RecursiveDir)%(Filename)%(Extension)"

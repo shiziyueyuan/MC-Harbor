@@ -80,8 +80,8 @@ jobs:
           & (Join-Path $tool 'wix.exe') extension add -g WixToolset.UI.wixext/5.0.2
           if ($LASTEXITCODE -ne 0) { throw 'WiX extension installation failed.' }
           $tool | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-      - name: Check local translation transport privacy
-        run: dotnet run --project tests/windows-local-transport/LocalTransportChecks.csproj -c Release
+      - name: Check restored sessions, bounded logs and theme contrast
+        run: dotnet run --project tests/windows-game-sessions/SessionChecks.csproj -c Release
       - name: Check platform routing and native execution
         run: dotnet run --project tests/windows-platform-checks/PlatformChecks.csproj -c Release -r win-${{ matrix.architecture }} --self-contained false -- --expect-architecture ${{ matrix.architecture }}
       - name: Check emulated OPUS runtime on ARM64
@@ -96,6 +96,8 @@ jobs:
         run: |
           $architecture = '${{ matrix.architecture }}'
           tools/build-windows.ps1 -Mode Publish -Architecture $architecture
+          python tools/check-windows-game-lifecycle.py --jdk $env:JAVA_HOME --dotnet (Get-Command dotnet).Source
+          if ($LASTEXITCODE -ne 0) { throw 'Detached game lifecycle check failed.' }
           $folder = if ($architecture -eq 'arm64') { 'build/MC-Harbor-Windows-arm64' } else { 'build/MC-Harbor-Windows' }
           tools/package-windows.ps1 -PublishDirectory $folder -Architecture $architecture -Format Installer
           python tools/check-windows-backend.py --directory $folder --architecture $architecture

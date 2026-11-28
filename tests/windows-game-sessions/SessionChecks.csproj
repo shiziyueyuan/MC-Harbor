@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../shared/MCHarbor.Core/MCHarbor.Core.csproj" />
+    <Compile Include="../../windows/Services/GameSessionStore.cs" Link="GameSessionStore.cs" />
+    <Compile Include="../../windows/Services/PendingGameHistoryStore.cs" Link="PendingGameHistoryStore.cs" />
+    <Compile Include="../../windows/Services/InstanceMediaStore.cs" Link="InstanceMediaStore.cs" />
+    <Compile Include="../../windows/Services/InstanceFootprint.cs" Link="InstanceFootprint.cs" />
+    <Compile Include="../../windows/Services/ThemeSettings.cs" Link="ThemeSettings.cs" />
+    <Compile Include="../../windows/Services/MacLayout.cs" Link="MacLayout.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Version>1.7.1</Version>
+    <RootNamespace>MCHarbor.Core</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="MC Harbor" />
+    <InternalsVisibleTo Include="MCHarbor.Linux" />
+    <InternalsVisibleTo Include="MCHarbor.Core.Checks" />
+    <InternalsVisibleTo Include="MCHarbor.Linux.Checks" />
+    <InternalsVisibleTo Include="LocalTransportChecks" />
+    <InternalsVisibleTo Include="PlatformChecks" />
+  </ItemGroup>
+</Project>

@@ -5,9 +5,79 @@
     xmlns:controls="using:Microsoft.UI.Xaml.Controls">
     <Application.Resources>
         <ResourceDictionary>
+            <!-- Native popup materials: keep popup content fully opaque and blur only the surface behind it. -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <AcrylicBrush x:Key="ComboBoxDropDownBackground" TintColor="#191E2A" TintOpacity="0.50" TintLuminosityOpacity="0.57" FallbackColor="#303B4A" />
+                    <AcrylicBrush x:Key="MenuFlyoutPresenterBackground" TintColor="#191E2A" TintOpacity="0.50" TintLuminosityOpacity="0.57" FallbackColor="#303B4A" />
+                    <AcrylicBrush x:Key="FlyoutPresenterBackground" TintColor="#191E2A" TintOpacity="0.50" TintLuminosityOpacity="0.57" FallbackColor="#303B4A" />
+                    <LinearGradientBrush x:Key="ComboBoxDropDownBorderBrush" StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#42FFFFFF" Offset="0" />
+                        <GradientStop Color="#18FFFFFF" Offset="1" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="MenuFlyoutPresenterBorderBrush" StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#42FFFFFF" Offset="0" />
+                        <GradientStop Color="#18FFFFFF" Offset="1" />
+                    </LinearGradientBrush>
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#18FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedUnfocused" Color="#18FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPointerOver" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPressed" Color="#20FFFFFF" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <AcrylicBrush x:Key="ComboBoxDropDownBackground" TintColor="#EDF4F8" TintOpacity="0.50" TintLuminosityOpacity="0.57" FallbackColor="#E6EFF3" />
+                    <AcrylicBrush x:Key="MenuFlyoutPresenterBackground" TintColor="#EDF4F8" TintOpacity="0.50" TintLuminosityOpacity="0.57" FallbackColor="#E6EFF3" />
+                    <AcrylicBrush x:Key="FlyoutPresenterBackground" TintColor="#EDF4F8" TintOpacity="0.50" TintLuminosityOpacity="0.57" FallbackColor="#E6EFF3" />
+                    <LinearGradientBrush x:Key="ComboBoxDropDownBorderBrush" StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#B0FFFFFF" Offset="0" />
+                        <GradientStop Color="#40708090" Offset="1" />
+                    </LinearGradientBrush>
+                    <LinearGradientBrush x:Key="MenuFlyoutPresenterBorderBrush" StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#B0FFFFFF" Offset="0" />
+                        <GradientStop Color="#40708090" Offset="1" />
+                    </LinearGradientBrush>
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#20273F50" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#20273F50" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="#18273F50" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedUnfocused" Color="#18273F50" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#20273F50" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#20273F50" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="#20273F50" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="#20273F50" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPointerOver" Color="#20273F50" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPressed" Color="#20273F50" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="MenuFlyoutPresenterBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="FlyoutPresenterBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="MenuFlyoutPresenterBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedUnfocused" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="MenuFlyoutItemBackgroundPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="ToggleMenuFlyoutItemBackgroundPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
             <ResourceDictionary.MergedDictionaries>
                 <controls:XamlControlsResources />
             </ResourceDictionary.MergedDictionaries>
+            <!-- The SDK default paints desktop acrylic behind menus; use the in-app backdrop instead. -->
+            <Style TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">
+                <Setter Property="SystemBackdrop" Value="{x:Null}" />
+            </Style>
             <FontFamily x:Key="ContentControlThemeFontFamily">ms-appx:///Assets/Fonts/#Source Han Serif CN</FontFamily>
             <Style TargetType="TextBlock">
                 <Setter Property="FontFamily" Value="{ThemeResource ContentControlThemeFontFamily}" />

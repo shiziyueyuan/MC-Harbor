@@ -41,6 +41,6 @@ internal static class WindowsPlatform
         }
     }
     internal static string LocalTranslationNotice => NativeArchitecture == "arm64"
-        ? "当前 ARM64 版的 OPUS-MT 使用独立 x64 兼容进程，需要 Windows 11 24H2 或更新版本；进阶 2B 引擎优先使用原生 ARM64。"
+        ? "当前 ARM64 版的 OPUS-MT 使用独立 x64 兼容进程，需要 Windows 11 24H2 或更新版本。"
         : "";
 }

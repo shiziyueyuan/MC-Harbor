@@ -15,6 +15,10 @@ internal static class Program
     {
         try
         {
+            MCHarbor.Core.Services.HarborHost.Configure(
+                new(AppPaths.ApplicationDirectory, AppPaths.DataDirectory, AppPaths.DataDirectory,
+                    Path.Combine(AppPaths.DataDirectory, "cache"), AppPaths.DataDirectory, Path.Combine(AppPaths.DataDirectory, "run"), false),
+                "Windows", AppPaths.Version, AppPaths.GetPreference, AppPaths.SetPreference);
             if (WindowsPlatform.ClientArchitecture == "arm64" && !OperatingSystem.IsWindowsVersionAtLeast(10, 0, 26100))
             {
                 ShowLaunchError(IntPtr.Zero, "ARM64 版本需要 Windows 11 24H2 或更新版本。", "MC Harbor ARM64", 0x10);

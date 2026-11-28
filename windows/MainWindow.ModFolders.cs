@@ -1,4 +1,4 @@
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 using MCHarbor.Windows.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -7,6 +7,26 @@ namespace MCHarbor.Windows;
 
 public sealed partial class MainWindow
 {
+    public sealed record ModFolderDisplayEntry(ModFolderEntry Entry)
+    {
+        public string Name => Entry.Name;
+        public Visibility IconVisibility => PreferenceEnabled("collectionDisplay.icon", true) ? Visibility.Visible : Visibility.Collapsed;
+        public string IconPath => Entry.IconPath ?? "";
+        public string Details
+        {
+            get
+            {
+                var rows = new List<string>();
+                if (PreferenceEnabled("collectionDisplay.loader", true)) rows.Add(Entry.Loader is { Length: > 0 } loader ? loader : "未记录加载器");
+                if (PreferenceEnabled("collectionDisplay.modVersion", true)) rows.Add(Entry.ModVersion is { Length: > 0 } version ? version : "未记录模组版本");
+                if (PreferenceEnabled("collectionDisplay.gameVersion")) rows.Add(Entry.Game is { Length: > 0 } game ? "MC " + game : "未记录 Minecraft 版本");
+                if (PreferenceEnabled("collectionDisplay.authors") && (Entry.Authors ?? Entry.Project?.Author) is { Length: > 0 } author) rows.Add(author);
+                if (PreferenceEnabled("collectionDisplay.summary") && Entry.Project?.Description is { Length: > 0 } summary) rows.Add(summary);
+                if (PreferenceEnabled("collectionDisplay.collectedAt")) rows.Add(Entry.CollectedAt?.ToLocalTime().ToString("yyyy-MM-dd") ?? "未记录收藏时间");
+                return string.Join(" · ", rows);
+            }
+        }
+    }
     private ModFolder? _selectedModFolder;
 
     private void RefreshModFolders(Guid? selected = null)
@@ -70,7 +90,7 @@ public sealed partial class MainWindow
         var folder = _selectedModFolder;
         ModFolderTitle.Text = folder?.Name ?? "";
         ModFolderEntries.ItemsSource = folder?.Entries.Where(entry => entry.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
-            || entry.Details.Contains(query, StringComparison.OrdinalIgnoreCase)).ToArray();
+            || entry.Details.Contains(query, StringComparison.OrdinalIgnoreCase)).Select(entry => new ModFolderDisplayEntry(entry)).ToArray();
         ModFolderStatus.Text = folder is null ? "新建模组夹后可收藏本地或在线模组。" : $"{folder.Entries.Length} 个模组";
     }
 
@@ -121,7 +141,7 @@ public sealed partial class MainWindow
         await CatalogOperationAsync(cancellation =>
         {
             if (_selectedModFolder is not { } current) return Task.CompletedTask;
-            var ids = ModFolderEntries.SelectedItems.OfType<ModFolderEntry>().Select(entry => entry.Id).ToHashSet();
+            var ids = ModFolderEntries.SelectedItems.OfType<ModFolderDisplayEntry>().Select(row => row.Entry.Id).ToHashSet();
             if (ids.Count == 0) return Task.CompletedTask;
             UpdateModFolder(current.Id, entries => entries.Where(entry => !ids.Contains(entry.Id)).ToArray());
             return Task.CompletedTask;
@@ -171,7 +191,8 @@ public sealed partial class MainWindow
                 var path = Path.GetFullPath(mod.Path);
                 if (!string.Equals(Path.GetDirectoryName(path), root, StringComparison.OrdinalIgnoreCase)
                     || !IsSafeFileName(Path.GetFileName(path))) throw new IOException("模组路径无效，请刷新实例资源。");
-                entries.Add(await ModFolderStore.CollectAsync(path, mod.Name, instance.Version, instance.Loader, cancellation));
+                var entry = await ModFolderStore.CollectAsync(path, mod.Name, instance.Version, instance.Loader, cancellation);
+                entries.Add(entry with { ModVersion = mod.ModVersion, Authors = mod.Authors, IconPath = mod.IconPath });
             }
             AddFolderMods(folder, entries);
         });
@@ -183,7 +204,7 @@ public sealed partial class MainWindow
                 throw new IOException("请选择一个模组项目。");
             var folder = await PickModFolderAsync(cancellation);
             if (folder is null) return;
-            AddFolderMods(folder, [new ModFolderEntry($"{project.Source}:{project.Id}", project.Name, null, project, null, null)]);
+            AddFolderMods(folder, [new ModFolderEntry($"{project.Source}:{project.Id}", project.Name, null, project, null, null) { CollectedAt = DateTimeOffset.UtcNow }]);
         });
 
     private void AddFolderMods(ModFolder folder, IEnumerable<ModFolderEntry> entries)
@@ -214,7 +235,7 @@ public sealed partial class MainWindow
     private async void InstallFolderMods_Click(object sender, RoutedEventArgs e) =>
         await CatalogOperationAsync(async cancellation =>
         {
-            var selected = ModFolderEntries.SelectedItems.OfType<ModFolderEntry>().ToArray();
+            var selected = ModFolderEntries.SelectedItems.OfType<ModFolderDisplayEntry>().Select(row => row.Entry).ToArray();
             if (selected.Length == 0) throw new IOException("请选择要导入的模组。");
             if (ModFolderTarget.SelectedItem is not GameInstance target)
                 throw new IOException("请选择一个已安装模组加载器的目标实例。");

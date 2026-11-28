@@ -12,6 +12,7 @@ public sealed partial class WallpaperLibraryDialog : ContentDialog
 {
     private readonly MainWindow _owner;
     private MediaPlayer? _player;
+    private MediaSource? _previewSource;
     private long _previewSequence;
     private bool _open;
     private bool _busy;
@@ -65,7 +66,10 @@ public sealed partial class WallpaperLibraryDialog : ContentDialog
         try
         {
             var file = await StorageFile.GetFileFromPathAsync(_owner.WallpaperFilePath(item.Entry));
-            using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, 320, ThumbnailOptions.ResizeThumbnail);
+            var scale = XamlRoot?.RasterizationScale ?? 1;
+            var width = (uint)Math.Clamp(Math.Ceiling(166 * scale), 166, 664);
+            item.Thumbnail.DecodePixelWidth = (int)width;
+            using var thumbnail = await file.GetThumbnailAsync(ThumbnailMode.SingleItem, width, ThumbnailOptions.ResizeThumbnail);
             if (_open && thumbnail is { Type: ThumbnailType.Image }) await item.Thumbnail.SetSourceAsync(thumbnail);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException
@@ -75,7 +79,14 @@ public sealed partial class WallpaperLibraryDialog : ContentDialog
         }
     }
 
-    private async void Items_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void Items_SelectionChanged(object sender, SelectionChangedEventArgs e) => await LoadSelectedPreviewAsync();
+
+    private async void VideoPreviewEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_open) await LoadSelectedPreviewAsync();
+    }
+
+    private async Task LoadSelectedPreviewAsync()
     {
         if (!_open) return;
         var sequence = ++_previewSequence;
@@ -105,6 +116,11 @@ public sealed partial class WallpaperLibraryDialog : ContentDialog
             if (!_open || sequence != _previewSequence) return;
             if (item.Entry.Video)
             {
+                if (VideoPreviewEnabled.IsChecked != true)
+                {
+                    PreviewPlaceholder.Text = "视频预览已关闭";
+                    return;
+                }
                 var player = new MediaPlayer { IsMuted = true, IsLoopingEnabled = true };
                 _player = player;
                 player.MediaFailed += (_, _) => DispatcherQueue.TryEnqueue(() =>
@@ -121,12 +137,14 @@ public sealed partial class WallpaperLibraryDialog : ContentDialog
                 });
                 VideoPreview.SetMediaPlayer(player);
                 VideoPreview.Visibility = Visibility.Visible;
-                player.Source = MediaSource.CreateFromStorageFile(file);
+                _previewSource = MediaSource.CreateFromStorageFile(file);
+                player.Source = _previewSource;
                 player.Play();
             }
             else
             {
-                var image = new BitmapImage { DecodePixelWidth = 960 };
+                var width = (int)Math.Clamp(Math.Ceiling(Math.Max(300, ImagePreview.ActualWidth) * (XamlRoot?.RasterizationScale ?? 1)), 300, 1600);
+                var image = new BitmapImage { DecodePixelWidth = width };
                 image.ImageFailed += (_, _) =>
                 {
                     if (!_open || sequence != _previewSequence) return;
@@ -228,9 +246,14 @@ public sealed partial class WallpaperLibraryDialog : ContentDialog
         VideoPreview.SetMediaPlayer(null);
         var player = _player;
         _player = null;
-        if (player is null) return;
-        player.Pause();
-        player.Dispose();
+        if (player is not null)
+        {
+            player.Pause();
+            player.Source = null;
+            player.Dispose();
+        }
+        _previewSource?.Dispose();
+        _previewSource = null;
     }
 
     private void ClosePreview()

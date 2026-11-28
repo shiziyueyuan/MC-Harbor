@@ -37,7 +37,7 @@ public sealed partial class MainWindow
             });
             var text = new TextBlock
             {
-                Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center
+                Text = label, FontSize = 14, FontWeight = Microsoft.UI.Text.FontWeights.Medium, VerticalAlignment = VerticalAlignment.Center
             };
             Grid.SetColumn(text, 1);
             row.Children.Add(text);
@@ -46,7 +46,7 @@ public sealed partial class MainWindow
                 row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 LibraryGameCount = new TextBlock
                 {
-                    FontSize = 10, Opacity = 0.7,
+                    FontSize = 11, Opacity = 0.7,
                     VerticalAlignment = VerticalAlignment.Center, Visibility = Visibility.Collapsed
                 };
                 Grid.SetColumn(LibraryGameCount, 2);

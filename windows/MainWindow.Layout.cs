@@ -1,4 +1,4 @@
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 using MCHarbor.Windows.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
@@ -26,10 +26,10 @@ public sealed partial class MainWindow
         var library = view == InstanceList;
         var gap = library ? 14 : 20;
         var minimum = library ? 300 : 250;
-        var width = Math.Max(1, view.ActualWidth - gap - 2);
-        var columns = Math.Max(1, (int)((width + gap) / (minimum + gap)));
+        var width = Math.Max(1, view.ActualWidth - gap);
+        var (columns, itemWidth) = MacLayout.Cards(width, minimum, library ? 480 : double.MaxValue, gap);
         panel.MaximumRowsOrColumns = columns;
-        panel.ItemWidth = (width + gap) / columns;
+        panel.ItemWidth = itemWidth + gap;
         if (library) LibraryGridHeader.Width = width;
     }
 
@@ -86,13 +86,22 @@ public sealed partial class MainWindow
 
     private (string Label, string Terms, string Section, FrameworkElement Target)[] SettingsIndex() =>
     [
-        ("外观 · 玻璃与主题", "主题 反色 磨砂 毛玻璃 玻璃通透度 玻璃透明度 玻璃阴影强度 模糊 半径 性能 动效", "appearance", SettingsGlass),
-        ("外观 · 启动器壁纸", "壁纸库 图片 视频 MP4 预览 重命名 调暗 柔化", "appearance", SettingsWallpaper),
-        ("外观 · 界面音效", "音效 声音 音量", "appearance", SettingsSounds),
+        ("外观 · 主题色", "主题色 调色盘 配色", "appearance", SettingsPalette),
+        ("外观 · 主题范围与反色", "反色 主要文字 辅助文字 按钮背景 图标 边框 对比度", "appearance", SettingsThemeScopes),
+        ("外观 · 模组夹信息显示", "模组 图标 加载器 版本 收藏时间 简介 作者 信息量", "appearance", SettingsCollectionDisplay),
+        ("外观 · 外观模式", "主题 深色 浅色 通透", "appearance", SettingsGlass),
+        ("外观 · 背景", "壁纸库 图片 视频 MP4 预览 重命名 毛玻璃 玻璃通透 窗口透明 壁纸柔化 后景材质", "appearance", SettingsWallpaper),
+        ("外观 · 动态与声音", "独家优化 减少动态效果 音效 声音 音量 性能", "appearance", SettingsSounds),
         ("欢迎动画 · 启动播报", "欢迎 语音 播报 静音 音量 试听", "welcome", SettingsVoice),
-        ("运行 · 游戏目录", "目录 路径 Minecraft", "runtime", SettingsPaths),
-        ("运行 · 游戏与下载", "内存 下载 镜像 模组 依赖", "runtime", SettingsGameOptions),
-        ("维护 · 数据目录与诊断", "诊断 数据 历史 游玩 存储", "maintenance", SettingsData)
+        ("运行 · 翻译与账号授权", "翻译 API 密钥 Qwen 阿里 B站 MyMemory Google 凭据", "runtime", SettingsTranslation),
+        ("运行 · 游戏", "目录 路径 Minecraft Java 内存", "runtime", SettingsPaths),
+        ("运行 · 启动器", "游戏启动后 保持可见 隐藏 退出 后台会话", "runtime", SettingsLauncher),
+        ("运行 · 前置补全", "模组 依赖 前置补全", "runtime", SettingsDependencies),
+        ("运行 · 下载", "下载 镜像 并发数", "runtime", SettingsGameOptions),
+        ("维护 · 数据目录与诊断", "诊断 数据 存储", "maintenance", SettingsData),
+        ("维护 · 开发者与平台分工", "开发者 维护者 作者 分工 GitHub", "maintenance", DeveloperRows),
+        ("维护 · 贡献者", "贡献者 反馈 致谢", "maintenance", ContributorRows),
+        ("维护 · 关于", "关于 版本 GPL 许可", "maintenance", SettingsAbout)
     ];
 
     private void SettingsSearch_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs e)
@@ -126,14 +135,19 @@ public sealed partial class MainWindow
     private void UpdateWorkspaceHeader()
     {
         var show = IsInstancePage(_lastNavigationTag) && _activeModsInstance is not null;
+        var wasVisible = WorkspaceOverlay.Visibility == Visibility.Visible;
+        WorkspaceOverlay.Visibility = VisibleWhen(show);
+        MainNavigationSurface.IsHitTestVisible = !show;
+        MainNavigationSurface.Opacity = show ? 0.92 : 1;
+        UpdateWorkspaceBackdrop(show);
+        if (show && !wasVisible) DispatcherQueue.TryEnqueue(() => WorkspaceCloseButton.Focus(FocusState.Programmatic));
         WorkspaceIcon.Visibility = WorkspaceTabs.Visibility = WorkspaceTopActions.Visibility = VisibleWhen(show);
         if (!show || _activeModsInstance is not { } instance) return;
-        PageTitle.Text = instance.Id;
-        PageTitle.FontSize = 27;
-        PageSubtitle.Text = $"{instance.Version} · {instance.Loader}";
-        PageSubtitle.Visibility = Visibility.Visible;
+        WorkspaceTitle.Text = instance.FriendlyName;
+        WorkspaceSubtitle.Text = $"{instance.Version} · {instance.Loader}";
         WorkspaceIcon.Source = new BitmapImage(new Uri(instance.Artwork));
         InstanceSettingsPath.Text = instance.RunDirectory;
+        LoadInstanceOptions(instance);
         WorkspaceLaunchButton.Tag = WorkspaceOpenDirectory.Tag = WorkspaceRepair.Tag = WorkspaceExport.Tag =
             WorkspaceRelocate.Tag = WorkspaceJava.Tag = WorkspaceChangeIcon.Tag = WorkspaceShortcut.Tag = instance.Id;
         UpdateFeaturedLaunch();
@@ -152,7 +166,15 @@ public sealed partial class MainWindow
         }
     }
 
-    private void CloseWorkspace_Click(object sender, RoutedEventArgs e) => NavigateTo("games");
+    private void CloseWorkspace_Click(object sender, RoutedEventArgs e)
+    {
+        _activeModsInstance = null;
+        _instanceSpaceCancellation?.Cancel();
+        NavigateTo("games");
+    }
+
+    private void WorkspaceBackdrop_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e) =>
+        CloseWorkspace_Click(sender, new RoutedEventArgs());
 
     private void ResourceQuery_Changed(object sender, TextChangedEventArgs e)
     {
@@ -161,6 +183,16 @@ public sealed partial class MainWindow
 
     private void UpdateResourceRows()
     {
+        var media = _resourceCategory is "screenshots" or "logs";
+        InstanceMediaPage.Visibility = VisibleWhen(media && IsInstancePage(_lastNavigationTag));
+        if (_lastNavigationTag == "collections")
+            InstanceResourcesCard.Visibility = ResourcesList.Visibility = VisibleWhen(!media);
+        if (media)
+        {
+            PrepareInstanceMedia();
+            UpdateTabSelection(WorkspaceTabs, _resourceCategory);
+            return;
+        }
         var query = ResourceQuery.Text.Trim();
         var items = _instanceResources.Where(item => item.Kind == _resourceCategory
             && (item.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
@@ -177,6 +209,16 @@ public sealed partial class MainWindow
         CollectWorkspaceMods.Visibility = VisibleWhen(_resourceCategory == "mods");
         BackupWorkspaceWorlds.Visibility = VisibleWhen(_resourceCategory == "saves");
         UpdateTabSelection(WorkspaceTabs, _resourceCategory);
+    }
+
+    private void ApplyMacPageLayout(string tag)
+    {
+        var settings = tag == "settings";
+        var library = tag == "games" || IsInstancePage(tag);
+        var inset = settings ? MacLayout.SettingsInset : MacLayout.PageInset;
+        PageContent.Padding = new Thickness(inset, library ? 14 : settings ? 24 : 28, inset, 28);
+        PageHeader.Margin = new Thickness(0, 0, 0, settings ? 20 : tag is "friends" or "downloads" ? 22 : 24);
+        if (!IsInstancePage(tag)) InstanceMediaPage.Visibility = Visibility.Collapsed;
     }
 
     private async void RefreshWorkspaceResources_Click(object sender, RoutedEventArgs e) => await LoadResourcesAsync();

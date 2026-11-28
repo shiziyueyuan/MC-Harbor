@@ -73,6 +73,7 @@ public partial class App : Application
             if (main.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter
                 && presenter.State == Microsoft.UI.Windowing.OverlappedPresenterState.Minimized)
                 presenter.Restore();
+            main.AppWindow.Show();
             main.Activate();
             main.QueueActivation(id);
         }

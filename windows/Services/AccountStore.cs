@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using MCHarbor.Windows.Models;
+using MCHarbor.Core.Models;
 
 namespace MCHarbor.Windows.Services;
 
@@ -72,6 +72,15 @@ internal static class AccountStore
         var records = ReadAll().Where(item => item.Id != id).Append(account).ToList();
         WriteAtomically(AppPaths.AccountsFile, JsonSerializer.SerializeToUtf8Bytes(records, JsonOptions));
         return account;
+    }
+
+    public static void Remove(string id)
+    {
+        var records = ReadAll();
+        if (records.All(item => item.Id != id)) return;
+        File.Delete(GetSecretPath(id));
+        WriteAtomically(AppPaths.AccountsFile, JsonSerializer.SerializeToUtf8Bytes(records.Where(item => item.Id != id).ToArray(), JsonOptions));
+        if (AppPaths.SelectedAccountId == id) Select(null);
     }
 
     public static JsonObject? LoadPayload(string id)

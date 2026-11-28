@@ -3,7 +3,6 @@ import argparse
 import contextlib
 import hashlib
 import json
-import msvcrt
 import os
 from pathlib import Path
 import re
@@ -38,14 +37,19 @@ def setup_lock(directory):
     with (directory / "setup.lock").open("a+b") as lock:
         lock.seek(0)
         try:
-            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as error:
             raise RuntimeError("已有一个 MC Harbor 窗口正在准备本机翻译。") from error
         yield
 
 
 def install_modules(state):
-    target = state / "python-packages-4.8.0-v1"
+    target = state / ("python-packages-4.8.0-v1" if os.name == "nt" else "python-packages-linux-x64-cp312-v1")
     if not (target / "ctranslate2" / "__init__.py").is_file():
         emit(event="progress", message="正在准备本机翻译运行库…")
         with tempfile.TemporaryDirectory(prefix="python-", dir=state) as directory:
@@ -53,9 +57,11 @@ def install_modules(state):
             command = [
                 sys.executable, "-I", "-m", "pip", "--isolated", "--disable-pip-version-check",
                 "install", "--no-cache-dir", "--only-binary=:all:", "--require-hashes",
-                "--target", str(stage), "-r", str(Path(__file__).with_name("requirements.txt"))
+                "--target", str(stage), "-r", str(Path(__file__).with_name("requirements.txt" if os.name == "nt" else "requirements-linux.txt"))
             ]
             wheels = state / "wheels"
+            if not wheels.is_dir() and os.name != "nt":
+                wheels = Path(__file__).with_name("wheels")
             if wheels.is_dir():
                 command.extend(["--no-index", "--find-links", str(wheels)])
             else:

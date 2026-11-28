@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+from hmcl_display_buffer import prepare_managed_process_source
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -92,6 +93,7 @@ def main() -> None:
     sources = sorted((ROOT / "backend").rglob("*.java"))
     if not sources:
         raise SystemExit("backend/ 下没有 Java 源码。")
+    sources.append(prepare_managed_process_source(ROOT, build / "generated-hmcl"))
 
     subprocess.run(
         [

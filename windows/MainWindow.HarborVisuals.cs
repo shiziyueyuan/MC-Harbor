@@ -45,12 +45,17 @@ public sealed partial class MainWindow
         var start = dark ? Color.FromArgb(255, 26, 26, 26) : Color.FromArgb(255, 240, 240, 240);
         var end = dark ? Color.FromArgb(255, 55, 55, 55) : Color.FromArgb(255, 213, 213, 213);
         var glow = dark ? Color.FromArgb(46, 151, 151, 151) : Color.FromArgb(56, 255, 255, 255);
+        if (ThemeMode.SelectedIndex == 3)
+        {
+            start = ToColor(Rgb.Mix(new(245, 245, 245), _themeColor, 0.25));
+            end = ToColor(Rgb.Mix(new(220, 220, 220), _themeColor, 0.18));
+        }
         var paletteChanged = start != _backdropStart || end != _backdropEnd;
         _backdropStart = start;
         _backdropEnd = end;
         _backdropGlow = glow;
         _darkAppearance = dark;
-        _glassClarity = GlassTransparency.Value / 100;
+        _glassClarity = GlassEnabled.IsOn ? 0.15 : ThemeMode.SelectedIndex == 2 ? Math.Max(0.7, GlassTransparency.Value / 100) : GlassTransparency.Value / 100;
         _blurBlend = 0.94 - 0.74 * _glassClarity;
 
         var background = highContrast ? systemBackground : start;
@@ -58,16 +63,29 @@ public sealed partial class MainWindow
         ((SolidColorBrush)RootShell.Background).Color = background;
         WallpaperImage.Opacity = highContrast ? 0 : 1;
         WindowGlassTint.Background = _windowTint;
-        _windowTint.Color = _glassLayerActive ? WithAlpha(start, (byte)Math.Round(94 - 86 * _glassClarity))
+        _windowTint.Color = _glassLayerActive ? WithAlpha(start, (byte)Math.Round(255 * (1 - WindowTransparency.Value / 100)))
             : Microsoft.UI.Colors.Transparent;
         _cardTint = WithAlpha(dark ? Color.FromArgb(255, 46, 46, 46) : Color.FromArgb(255, 245, 245, 245),
             (byte)Math.Round((dark ? 145 : 158) - 122 * _glassClarity));
+        if (!highContrast)
+        {
+            _cardTint = ThemeColorFor("surfaces", _cardTint);
+            if (_themeSettings.Roles.GetValueOrDefault("surfaces", "system") != "system")
+                _cardTint = WithAlpha(_cardTint, (byte)Math.Round(255 * Math.Clamp(_themeSettings.SurfaceStrength, 0, 1)));
+        }
         _scrollingGlassFill.Color = _cardTint;
         _cardFallback.Color = highContrast ? systemBackground
             : dark ? Color.FromArgb(255, 43, 43, 43) : Color.FromArgb(255, 241, 241, 241);
         _glassBorder.Color = highContrast ? foreground
             : dark ? Color.FromArgb(59, 240, 240, 240) : Color.FromArgb(45, 45, 45, 45);
+        if (!highContrast)
+        {
+            _glassBorder.Color = ThemeColorFor("borders", _glassBorder.Color);
+            if (_themeSettings.Roles.GetValueOrDefault("borders", "system") != "system")
+                _glassBorder.Color = WithAlpha(_glassBorder.Color, (byte)Math.Round(255 * Math.Clamp(_themeSettings.BorderStrength, 0, 1)));
+        }
         ((SolidColorBrush)RootShell.Resources["HarborPanelStroke"]).Color = _glassBorder.Color;
+        ApplyThemeText(dark, highContrast);
         SidebarDivider.Background = new SolidColorBrush(highContrast ? foreground
             : dark ? Color.FromArgb(39, 248, 248, 248) : Color.FromArgb(32, 42, 42, 42));
         UpdateGlassShadowOpacity();
@@ -90,7 +108,7 @@ public sealed partial class MainWindow
         var glass = (AcrylicBrush)resources["HarborButtonGlass"];
         var prominent = (AcrylicBrush)resources["HarborProminentGlass"];
         var buttonTint = dark ? Color.FromArgb(255, 49, 49, 49) : Color.FromArgb(255, 240, 240, 240);
-        var accentTint = dark ? Color.FromArgb(255, 187, 221, 216) : Color.FromArgb(255, 176, 213, 210);
+        var accentTint = ThemeColorFor("buttonFill", ToColor(_themeColor));
         glass.TintColor = buttonTint;
         glass.TintOpacity = 0.79 - 0.18 * _glassClarity;
         glass.FallbackColor = highContrast ? systemBackground
@@ -99,7 +117,9 @@ public sealed partial class MainWindow
         prominent.TintOpacity = 0.85 - 0.20 * _glassClarity;
         prominent.FallbackColor = highContrast ? systemBackground : accentTint;
         glass.AlwaysUseFallback = prominent.AlwaysUseFallback = !_glassLayerActive;
-        ((SolidColorBrush)resources["HarborProminentText"]).Color = highContrast ? foreground : Color.FromArgb(255, 20, 37, 38);
+        var fill = new Rgb(accentTint.R, accentTint.G, accentTint.B);
+        var ink = _themeSettings.Resolve("buttonText", new(20, 37, 38), _themeColor);
+        ((SolidColorBrush)resources["HarborProminentText"]).Color = highContrast ? foreground : ToColor(Rgb.Protect(ink, fill, _themeSettings.ProtectContrast));
         ((LinearGradientBrush)resources["HarborButtonShine"]).Opacity = _glassLayerActive ? 1 : 0;
         var rim = (LinearGradientBrush)resources["HarborButtonRim"];
         rim.GradientStops[0].Color = highContrast ? foreground : Color.FromArgb(98, 255, 255, 255);
@@ -110,7 +130,7 @@ public sealed partial class MainWindow
 
     private void UpdateGlassShadowOpacity()
     {
-        var strength = _glassLayerActive ? GlassShadow.Value / 100 : 0;
+        var strength = _glassLayerActive ? DefaultGlassShadow / 100d : 0;
         _cardShadowOpacity = strength * 0.54;
         ((SolidColorBrush)RootShell.Resources["HarborButtonShadowCore"]).Opacity = strength;
         ((LinearGradientBrush)RootShell.Resources["HarborButtonShadowSoft"]).Opacity = strength;
@@ -240,7 +260,7 @@ public sealed partial class MainWindow
             _harborBackdrop ??= new HarborBackdrop(_wallpaperCanvasDevice);
             ICanvasImage? media = _wallpaperFrameReady ? _wallpaperFrameBitmap : _wallpaperStillBitmap;
             _harborBackdrop.Draw(viewport, _backdropStart, _backdropEnd, _backdropGlow, media,
-                WallpaperDimming.Value / 100, WallpaperSoftness.Value);
+                0.04, WallpaperSoftness.Value);
             if (!ReferenceEquals(WallpaperImage.Source, _harborBackdrop.ImageSource))
                 WallpaperImage.Source = _harborBackdrop.ImageSource;
 
@@ -265,14 +285,14 @@ public sealed partial class MainWindow
         {
             _lastGlassTimestamp = Stopwatch.GetTimestamp();
             _glassRevision++;
-            var radii = new[] { GlassBlur.Value, SidebarGlassBlur.Value, AccountListGlassBlur.Value, AccountDetailsGlassBlur.Value };
+            var radii = new[] { GlassBlur.Value };
             foreach (var oldRadius in _blurredWallpaper.Keys.Except(radii).ToArray())
             {
                 _blurredWallpaper[oldRadius].Dispose();
                 _blurredWallpaper.Remove(oldRadius);
             }
             var blurred = GetBlurredWallpaper(source, viewport, GlassBlur.Value);
-            if (GlassBlur.Value == 0 && SidebarGlassBlur.Value == 0)
+            if (GlassBlur.Value == 0)
             {
                 WindowGlassLayer.Background = null;
             }
@@ -288,16 +308,6 @@ public sealed partial class MainWindow
                 using (var drawing = _windowGlassImage.CreateDrawingSession(_backdropStart))
                 {
                     drawing.DrawImage(blurred);
-                    if (SidebarGlassBlur.Value != GlassBlur.Value)
-                    {
-                        var sidebarBlur = GetBlurredWallpaper(source, viewport, SidebarGlassBlur.Value);
-                        var sidebarWidth = Math.Clamp(Math.Round(Sidebar.ActualWidth * width / viewport.Width), 0, width);
-                        if (sidebarWidth > 0)
-                        {
-                            var strip = new Rect(0, 0, sidebarWidth, height);
-                            drawing.DrawImage(sidebarBlur, strip, strip);
-                        }
-                    }
                 }
                 _windowGlassBrush.Opacity = _blurBlend * 0.60;
                 if (!ReferenceEquals(WindowGlassLayer.Background, _windowGlassBrush))
@@ -349,12 +359,7 @@ public sealed partial class MainWindow
 
             try
             {
-                var radius = card.BlurGroup switch
-                {
-                    HarborGlassBlurGroup.AccountList => AccountListGlassBlur.Value,
-                    HarborGlassBlurGroup.AccountDetails => AccountDetailsGlassBlur.Value,
-                    _ => GlassBlur.Value
-                };
+                var radius = GlassBlur.Value;
                 var blurred = GetBlurredWallpaper(source, viewport, radius);
                 var surface = previous ?? new GlassCardSurface(device);
                 if (previous is null) _glassCards[card] = surface;
