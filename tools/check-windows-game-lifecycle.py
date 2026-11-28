@@ -65,6 +65,12 @@ public final class LifecycleFixture {
                 if (child.isAlive()) child.destroy();
                 Files.writeString(Path.of(args[0]).resolve("completed"), "stopped");
             }
+        } catch (java.io.IOException ex) {
+            if (args.length > 3 && ex.getMessage() != null && ex.getMessage().contains("\u5df2\u6709\u5b9e\u4f8b")) {
+                System.err.println("DUPLICATE_INSTANCE_LOCK");
+                System.exit(23);
+            }
+            throw ex;
         }
     }
 }
@@ -90,9 +96,7 @@ process.stdout.close(); process.stderr.close()
             duplicate = [*command[:-1], str(control / f"{uuid.uuid4()}.stop"), "duplicate"]
             result = subprocess.run(duplicate, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
             error_text = result.stderr.decode("utf-8", "replace")
-            if "已有实例" not in error_text:
-                error_text = result.stderr.decode("gb18030", "replace")
-            assert result.returncode != 0 and "已有实例" in error_text, f"Duplicate launch check failed: exit={result.returncode}, error={error_text}"
+            assert result.returncode == 23 and "DUPLICATE_INSTANCE_LOCK" in error_text, f"Duplicate launch check failed: exit={result.returncode}, error={error_text}"
             completed_checks.append("duplicate-instance-directory-is-locked")
             marker.write_text("stop", encoding="utf-8")
             wait_for(lambda: (stage / "completed").exists() and not receipt.exists(), "Stop request did not release the game and receipt.")
@@ -103,6 +107,7 @@ process.stdout.close(); process.stderr.close()
                 marker.write_text("stop", encoding="utf-8")
                 wait_for(lambda: not receipt.exists(), "Fixture cleanup did not finish.")
     evidence = ROOT / "evidence/windows-game-lifecycle.json"
+    evidence.parent.mkdir(parents=True, exist_ok=True)
     evidence.write_text(json.dumps({"passed": len(completed_checks), "failed": 0, "realGameOrUserDataUsed": False, "checks": completed_checks}, indent=2) + "\n", encoding="utf-8")
     for name in completed_checks: print("PASS " + name)
 
